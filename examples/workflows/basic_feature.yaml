@@ -1,0 +1,8 @@
+name: basic_feature
+description: A simple sequential workflow for planning a full-stack feature.
+agents:
+  - examples/agents/planner.yaml
+  - examples/agents/frontend.yaml
+  - examples/agents/backend.yaml
+  - examples/agents/testing.yaml
+  - examples/agents/reviewer.yaml
