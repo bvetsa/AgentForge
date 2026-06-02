@@ -12,9 +12,32 @@ The long-term goal is to make high-quality AI-assisted software development more
 
 ## Current Status
 
-**Phase 0:** Project definition and initial repository structure.
+**Phase 1:** YAML-driven workflow runner.
 
-The first implementation phase will build a narrow MVP: a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, and writes traceable run artifacts.
+The current implementation is a narrow MVP: a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, and writes traceable run artifacts.
+
+## Local Setup
+
+Create a virtual environment and install the package with development tools:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
+```
+
+Run the example workflow:
+
+```bash
+agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app"
+```
+
+Run the automated checks:
+
+```bash
+pytest
+ruff check .
+```
 
 ## MVP Goal
 
