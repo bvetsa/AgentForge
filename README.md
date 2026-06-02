@@ -161,3 +161,11 @@ Reviewer Agent
 ```
 
 This workflow does not modify files yet. It only produces planning and review artifacts.
+
+## Phase 1 Smoke Test
+
+Install the project in editable mode:
+
+```bash
+pip install -e ".[dev]"
+```
