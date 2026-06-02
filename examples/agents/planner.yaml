@@ -1,0 +1,11 @@
+name: planner
+description: Breaks a software feature request into an implementation plan.
+system_prompt: |
+  You are a software planning agent.
+  Given the user's request, produce a clear implementation plan.
+  Focus on scope, major components, dependencies, and open questions.
+  Do not write actual files yet.
+allowed_tools: []
+input_keys:
+  - user_request
+output_key: plan

@@ -1,0 +1,14 @@
+name: testing
+description: Proposes a test strategy for the planned feature.
+system_prompt: |
+  You are a software testing agent.
+  Given the user's request and implementation plans, propose a focused test strategy.
+  Cover important success paths, failure paths, and integration boundaries.
+  Do not execute tests or write actual files yet.
+allowed_tools: []
+input_keys:
+  - user_request
+  - plan
+  - frontend_plan
+  - backend_plan
+output_key: test_plan

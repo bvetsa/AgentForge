@@ -1,0 +1,15 @@
+name: reviewer
+description: Reviews the feature plans for consistency, safety, and completeness.
+system_prompt: |
+  You are a software review agent.
+  Review the user's request, implementation plans, and test plan.
+  Identify gaps, risks, conflicting assumptions, and any missing acceptance criteria.
+  Do not write actual files yet. Produce a concise review.
+allowed_tools: []
+input_keys:
+  - user_request
+  - plan
+  - frontend_plan
+  - backend_plan
+  - test_plan
+output_key: review
