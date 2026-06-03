@@ -1,8 +1,8 @@
 # AgentForge Architecture
 
-## Initial Architecture
+## Current Architecture
 
-The MVP architecture is intentionally simple.
+AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection.
 
 ```text
 CLI
@@ -16,8 +16,15 @@ Agent Loader
  v
 Workflow Runner
  |
- v
-Shared State
+ +--> Shared State
+ |
+ +--> Tool Context
+ |      |
+ |      v
+ |    Tool Registry
+ |      |
+ |      v
+ |    Filesystem Tools
  |
  v
 Mock LLM Client
@@ -26,29 +33,27 @@ Mock LLM Client
 Run Artifacts
 ```
 
-The first version should prove the core workflow engine before adding real LLM APIs, tools, dashboards, SDKs, Docker, or file modification.
+Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs.
 
-## MVP Workflow
+AgentForge still does not modify source files, generate patches, call real LLM APIs, run tests as an agent tool, or let agents dynamically choose tools.
 
-The initial MVP workflow is sequential:
+## Phase 2 Tool Flow
 
 ```text
-Planner Agent
-  |
-  v
-Frontend Agent
-  |
-  v
-Backend Agent
-  |
-  v
-Testing Agent
-  |
-  v
-Reviewer Agent
+CLI -> Workflow Runner -> Agent -> Tool Context -> Tool Registry -> Filesystem Tools -> Run Artifacts
 ```
 
-Each agent reads from shared state and writes one output back to shared state.
+Detailed flow:
+
+1. The CLI parses the workflow path, user input, and project context options.
+2. The workflow runner loads the workflow and agent configs.
+3. Before each agent runs, the runner reads that agent's `allowed_tools`.
+4. The runner calls the allowed read-only tools deterministically.
+5. Tool output is formatted into `tool_context`.
+6. The mock LLM client receives the agent config plus normal state inputs and `tool_context`.
+7. Agent outputs, trace events, and tool call records are written to run artifacts.
+
+Dynamic LLM-directed tool calling is intentionally deferred to a later phase.
 
 ## Components
 
@@ -62,14 +67,22 @@ Primary command:
 agentforge run <workflow_path> --input "<request>"
 ```
 
+Project context options:
+
+```bash
+agentforge run <workflow_path> --input "<request>" --project-root <path>
+agentforge run <workflow_path> --input "<request>" --no-project-context
+```
+
 Responsibilities:
 
 - Parse command-line arguments
 - Receive user input
+- Validate mutually exclusive project context flags
 - Invoke the workflow runner
 - Print the run directory and final status
 
-The CLI should stay thin. Most logic should live in the core engine.
+The CLI stays thin. Most logic lives in the core engine.
 
 ### Config Loader
 
@@ -80,10 +93,11 @@ Responsibilities:
 - Load workflow YAML
 - Load agent YAML
 - Validate required fields
+- Validate that `allowed_tools` is a list of strings
 - Raise clear errors for invalid configs
 - Resolve agent file paths from workflow configs
 
-The config loader should use safe YAML parsing and schema validation.
+The config loader uses safe YAML parsing and Pydantic schema validation.
 
 ### Agent
 
@@ -93,11 +107,10 @@ Responsibilities:
 
 - Store agent configuration
 - Identify required input keys
-- Build a prompt from shared state
-- Call the LLM client
+- Declare allowed read-only tools
 - Return output for its configured output key
 
-In the MVP, agents call a mock LLM client. Future versions may call real model providers.
+In the current implementation, agents use a mock LLM client. Future versions may call real model providers.
 
 ### Workflow
 
@@ -109,7 +122,7 @@ Responsibilities:
 - Store agent order
 - Define the composition of a development process
 
-The MVP supports sequential workflows only. Future versions may support graph-based workflows with branching, loops, and approval gates.
+The current runner supports sequential workflows only. Future versions may support graph-based workflows with branching, loops, and approval gates.
 
 ### Workflow Runner
 
@@ -118,13 +131,17 @@ The workflow runner executes the workflow.
 Responsibilities:
 
 - Initialize shared state
+- Resolve project context behavior
+- Initialize the tool registry when project context is enabled
+- Gather deterministic tool context from each agent's `allowed_tools`
 - Run agents in order
 - Check that required input keys exist
 - Update state after each agent
 - Record trace events
+- Record tool call events
 - Save run artifacts
 
-The runner is the core of the MVP.
+The runner is the core engine. It, not the LLM, decides which Phase 2 tools are called.
 
 ### Shared State
 
@@ -138,7 +155,7 @@ Initial state:
 }
 ```
 
-Example state after the MVP workflow:
+Example state after the workflow:
 
 ```json
 {
@@ -151,11 +168,70 @@ Example state after the MVP workflow:
 }
 ```
 
-Design rule: Agents communicate through shared state, not direct hidden messages.
+Design rule: agents communicate through shared state, not direct hidden messages.
+
+### Tools Package
+
+The `src/agentforge/tools` package contains the Phase 2 tool system.
+
+Current modules:
+
+- `base.py` - base `Tool` abstraction and `ToolError`
+- `registry.py` - `ToolRegistry` and registry errors
+- `filesystem.py` - read-only filesystem tools and project-root sandbox
+- `__init__.py` - public exports
+
+The package is intentionally small. It provides controlled, read-only project inspection rather than a general plugin system.
+
+### Tool Registry
+
+The tool registry stores reusable tools by name.
+
+Responsibilities:
+
+- Register available tools
+- Retrieve tools by name
+- Reject unknown tools with clear errors
+
+In Phase 2, the registry is initialized with the filesystem tools for a single project root.
+
+### Filesystem Tools
+
+Current read-only tools:
+
+- `list_files`
+- `read_file`
+- `search_files`
+- `inspect_tree`
+
+Responsibilities:
+
+- Inspect only files under the configured project root
+- Return relative paths where applicable
+- Ignore common junk directories
+- Reject unsafe file paths
+- Avoid writing, modifying, deleting, or patching files
+
+### Project Root Sandbox
+
+The filesystem sandbox constrains tool access to one project root.
+
+Project root behavior:
+
+- `--project-root <path>` uses the provided directory.
+- Omitting `--project-root` uses the current working directory.
+- `--no-project-context` disables tools for the run.
+
+Safety behavior:
+
+- Path traversal is rejected.
+- Absolute file paths are rejected for file reads.
+- Directory reads through `read_file` are rejected.
+- Files outside `project_root` cannot be read.
 
 ### Trace Logger
 
-The trace logger records execution history.
+The trace logger records agent execution history.
 
 Example event:
 
@@ -172,14 +248,30 @@ Example event:
 Responsibilities:
 
 - Record agent execution order
-- Record inputs and outputs used
+- Record inputs and output keys used
 - Record success or failure
 - Record timestamps
 - Support future debugging and dashboard visualization
 
+### Tool-Call Logging
+
+Tool-call logging records deterministic tool calls made by the runner.
+
+Each record includes:
+
+- Agent name
+- Tool name
+- Status
+- Input
+- Output preview
+- Timestamp
+- Error, if applicable
+
+This data is written to `tool_calls.json`. It gives future dashboards a clean observability surface for showing which tools ran, what context was gathered, and where failures occurred.
+
 ### Mock LLM Client
 
-The mock LLM client simulates LLM responses for MVP testing.
+The mock LLM client simulates LLM responses for local testing.
 
 Reasons for using a mock first:
 
@@ -188,11 +280,11 @@ Reasons for using a mock first:
 - Makes tests reliable
 - Lets the engine be tested before integrating real model providers
 
-The mock client should return deterministic output that includes the agent name and input summary.
+The mock client returns deterministic output that includes the agent name and input summary.
 
 ### Run Artifacts
 
-Each workflow run should write artifacts to:
+Each workflow run writes artifacts to:
 
 ```text
 .agentforge/runs/<run_id>/
@@ -204,6 +296,7 @@ Required files:
 input.txt
 state.json
 trace.json
+tool_calls.json
 final_report.md
 ```
 
@@ -212,13 +305,14 @@ Responsibilities:
 - Preserve the original user request
 - Save final shared state
 - Save trace events
+- Save tool call records
 - Generate a human-readable report
 
-Run artifacts make AgentForge inspectable and reproducible.
+Run artifacts make AgentForge inspectable and reproducible. They are generated output and should not be committed.
 
 ## Future Architecture
 
-The long-term architecture expands the MVP engine into a full platform.
+The long-term architecture expands the current engine into a fuller local platform.
 
 ```text
 CLI / SDK / Dashboard
@@ -248,17 +342,11 @@ Trace Store
 
 Stores available agents and allows users to enable, disable, or create agents.
 
-### Tool Registry
+### Dynamic Tool Calling
 
-Stores reusable tools such as:
+Allows model outputs to request tool calls during an agent step.
 
-- List files
-- Read file
-- Search files
-- Write patch proposal
-- Run tests
-- Inspect Git status
-- Apply patch after approval
+This is not part of Phase 2. Phase 2 only gathers deterministic context from `allowed_tools`.
 
 ### LLM Provider Layer
 
@@ -278,7 +366,7 @@ The provider layer should allow users to bring their own API keys.
 
 Allows agents to propose file changes as patches instead of directly modifying files.
 
-Design rule: The system should require human approval before applying patches.
+Design rule: the system should require human approval before applying patches.
 
 ### Test Runner
 
@@ -293,6 +381,7 @@ Provides a local visual interface for:
 - Choosing workflows
 - Enabling or disabling agents
 - Viewing traces
+- Viewing tool call logs
 - Reviewing patches
 - Inspecting test output
 - Comparing runs

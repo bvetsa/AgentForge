@@ -12,9 +12,13 @@ The long-term goal is to make high-quality AI-assisted software development more
 
 ## Current Status
 
-**Phase 1:** YAML-driven workflow runner.
+**Phase 1:** Implemented the YAML-driven workflow runner.
 
-The current implementation is a narrow MVP: a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, and writes traceable run artifacts.
+**Phase 2:** Implemented the read-only project inspection tool system.
+
+The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, and writes traceable run artifacts.
+
+AgentForge still does not modify source files, generate patches, execute tests as an agent tool, call real LLM APIs, or let agents dynamically decide which tools to call.
 
 ## Local Setup
 
@@ -26,71 +30,79 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-Run the example workflow:
+## CLI Usage
+
+Run a workflow with the current working directory as project context:
 
 ```bash
 agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app"
 ```
 
-Run the automated checks:
+Run a workflow with an explicit project root:
 
 ```bash
-pytest
-ruff check .
+agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app" --project-root examples/sample_project
 ```
 
-## MVP Goal
-
-The MVP is not a full autonomous coding platform. It is the core workflow engine.
-
-The first working version should allow a user to run:
+Run a workflow without project context:
 
 ```bash
-agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app"
+agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app" --no-project-context
 ```
 
-AgentForge should then run the configured agents in sequence and write the following artifacts:
+`--project-root` and `--no-project-context` are mutually exclusive.
+
+## Read-Only Project Inspection Tools
+
+Phase 2 adds a controlled tool layer for inspecting a project directory. Tools are selected from each agent's `allowed_tools` list and are called deterministically by the runner before that agent runs.
+
+Available tools:
+
+- `list_files` - recursively lists project files as relative paths
+- `read_file` - reads one UTF-8 text file under the project root
+- `search_files` - searches text files for a query and returns matching lines
+- `inspect_tree` - returns a readable directory tree
+
+Safety rules:
+
+- Tools are read-only.
+- Tools are sandboxed to the configured project root.
+- Path traversal and absolute paths are rejected.
+- Common junk directories such as `.git`, `.venv`, `__pycache__`, `node_modules`, `.pytest_cache`, and `.ruff_cache` are ignored.
+
+Project root behavior:
+
+- If `--project-root` is provided, that directory is used as the sandbox root.
+- If `--project-root` is omitted and `--no-project-context` is not used, the current working directory is used.
+- If `--no-project-context` is used, no tools run and `tool_calls.json` contains `[]`.
+
+## Run Artifacts
+
+Each workflow run writes artifacts to:
 
 ```text
 .agentforge/runs/<run_id>/
-  input.txt
-  state.json
-  trace.json
-  final_report.md
 ```
 
-## MVP Includes
+Required files:
 
-- Python package
-- CLI command
-- YAML-defined agents
-- YAML-defined workflows
-- Config validation
-- Sequential workflow runner
-- Shared workflow state
-- Mock LLM client
-- Trace logging
-- Saved run artifacts
-- Basic tests
+```text
+input.txt
+state.json
+trace.json
+tool_calls.json
+final_report.md
+```
 
-## MVP Excludes
+Artifact purposes:
 
-The MVP intentionally does not include:
+- `input.txt` stores the original user request.
+- `state.json` stores the final shared workflow state.
+- `trace.json` stores agent execution events.
+- `tool_calls.json` stores deterministic tool call records, including agent, tool, status, input, output preview, timestamp, and error when applicable.
+- `final_report.md` stores the human-readable agent output report.
 
-- Real LLM API integrations
-- LangGraph
-- Dashboard
-- SDK
-- Docker
-- File editing
-- Patch generation
-- Git integration
-- Test execution
-- User accounts
-- Agent marketplace
-- Autonomous app generation
-
-These features belong to later phases after the core workflow engine works.
+Run artifacts are generated output, not source files. They should not be committed.
 
 ## Core Ideas
 
@@ -110,7 +122,7 @@ Example agents:
 
 Workflows compose agents into an ordered process.
 
-The initial MVP uses sequential workflows. Later versions may support graph-based workflows with branching, loops, human approval points, and conditional execution.
+The current workflow runner supports sequential workflows. Later versions may support graph-based workflows with branching, loops, human approval points, and conditional execution.
 
 ### Shared State
 
@@ -120,25 +132,9 @@ The initial state contains the user's request. Each agent reads required keys fr
 
 ### Trace Logs
 
-Every workflow run should produce a trace that records which agents ran, what inputs they used, what output they produced, and whether each step succeeded.
+Every workflow run produces trace data that records which agents ran, what inputs they used, which output key they wrote, and whether each step succeeded.
 
-Trace logs make the system inspectable and debuggable.
-
-## Long-Term Vision
-
-AgentForge will eventually support three usage modes:
-
-1. CLI interface
-2. Python SDK
-3. Local dashboard through Docker and localhost
-
-The long-term product vision is a local-first platform where users can compose configurable specialist agents into development workflows, plug in their own API keys, inspect each step, approve code changes, and extend the system with custom agents.
-
-## Documentation
-
-- [SPEC.md](SPEC.md) - Project specification
-- [ROADMAP.md](ROADMAP.md) - Phased implementation roadmap
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture and design principles
+Trace logs and tool call logs make the system inspectable and debuggable.
 
 ## Example Workflow
 
@@ -160,12 +156,47 @@ Testing Agent
 Reviewer Agent
 ```
 
-This workflow does not modify files yet. It only produces planning and review artifacts.
+This workflow does not modify files. It inspects project context, then produces planning and review artifacts.
 
-## Phase 1 Smoke Test
+## Smoke Tests
 
-Install the project in editable mode:
+Run the automated checks:
 
 ```bash
-pip install -e ".[dev]"
+pytest
+ruff check .
 ```
+
+Run the default current-directory project context workflow:
+
+```bash
+agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app"
+```
+
+Run with an explicit project root:
+
+```bash
+agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app" --project-root examples/sample_project
+```
+
+Run without project context:
+
+```bash
+agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app" --no-project-context
+```
+
+## Long-Term Vision
+
+AgentForge will eventually support three usage modes:
+
+1. CLI interface
+2. Python SDK
+3. Local dashboard through Docker and localhost
+
+The long-term product vision is a local-first platform where users can compose configurable specialist agents into development workflows, plug in their own API keys, inspect each step, approve code changes, and extend the system with custom agents.
+
+## Documentation
+
+- [SPEC.md](SPEC.md) - Project specification
+- [ROADMAP.md](ROADMAP.md) - Phased implementation roadmap
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System architecture and design principles
