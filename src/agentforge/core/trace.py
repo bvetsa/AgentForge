@@ -1,5 +1,6 @@
 """Trace events for inspectable workflow runs."""
 
+import json
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
@@ -54,6 +55,88 @@ class TraceLog:
             input_keys=list(agent_config.input_keys),
             output_key=agent_config.output_key,
             status=status,
-            timestamp=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            timestamp=_utc_timestamp(),
             error_message=error_message,
         )
+
+
+@dataclass(frozen=True)
+class ToolCallRecord:
+    """One deterministic tool call made before an agent runs."""
+
+    agent: str
+    tool: str
+    status: Literal["success", "failed"]
+    input: dict[str, Any]
+    output_preview: str
+    timestamp: str
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        record = asdict(self)
+        if self.error is None:
+            record.pop("error")
+        return record
+
+
+class ToolCallLog:
+    """Collect tool call records in execution order."""
+
+    def __init__(self) -> None:
+        self.records: list[ToolCallRecord] = []
+
+    def append_success(
+        self,
+        *,
+        agent_name: str,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        output: Any,
+    ) -> None:
+        self.records.append(
+            ToolCallRecord(
+                agent=agent_name,
+                tool=tool_name,
+                status="success",
+                input=dict(tool_input),
+                output_preview=self._preview_output(output),
+                timestamp=_utc_timestamp(),
+            )
+        )
+
+    def append_failure(
+        self,
+        *,
+        agent_name: str,
+        tool_name: str,
+        tool_input: dict[str, Any],
+        error_message: str,
+    ) -> None:
+        self.records.append(
+            ToolCallRecord(
+                agent=agent_name,
+                tool=tool_name,
+                status="failed",
+                input=dict(tool_input),
+                output_preview="",
+                timestamp=_utc_timestamp(),
+                error=error_message,
+            )
+        )
+
+    def to_list(self) -> list[dict[str, Any]]:
+        return [record.to_dict() for record in self.records]
+
+    @staticmethod
+    def _preview_output(output: Any, max_length: int = 500) -> str:
+        if isinstance(output, str):
+            preview = output
+        else:
+            preview = json.dumps(output, sort_keys=True)
+        if len(preview) > max_length:
+            return f"{preview[:max_length]}..."
+        return preview
+
+
+def _utc_timestamp() -> str:
+    return datetime.now(UTC).isoformat().replace("+00:00", "Z")

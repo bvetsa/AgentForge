@@ -20,6 +20,7 @@ class ArtifactWriter:
         state: dict[str, str],
         trace_events: list[dict[str, Any]],
         agent_outputs: list[tuple[str, str]],
+        tool_calls: list[dict[str, Any]],
     ) -> Path:
         """Write all artifacts for one workflow run and return its directory."""
         run_directory = self.runs_directory / run_id
@@ -28,6 +29,7 @@ class ArtifactWriter:
         (run_directory / "input.txt").write_text(f"{input_text}\n", encoding="utf-8")
         self._write_json(run_directory / "state.json", state)
         self._write_json(run_directory / "trace.json", trace_events)
+        self._write_json(run_directory / "tool_calls.json", tool_calls)
         (run_directory / "final_report.md").write_text(
             self._build_final_report(workflow_name, input_text, agent_outputs),
             encoding="utf-8",

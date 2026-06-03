@@ -4,6 +4,8 @@
 
 **Goal:** Define the project scope, MVP, architecture, and example configs.
 
+**Status:** Implemented.
+
 **Deliverables:**
 
 - `README.md`
@@ -13,11 +15,11 @@
 - Example agent YAML files
 - Example workflow YAML file
 
-**Status:** Current phase.
-
 ## Phase 1: YAML-Driven Workflow Runner
 
 **Goal:** Build the first working CLI version.
+
+**Status:** Implemented.
 
 **Features:**
 
@@ -29,13 +31,13 @@
 - Maintain shared state
 - Write trace and result files
 
-**Expected command:**
+**Command:**
 
 ```bash
 agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app"
 ```
 
-**Expected output:**
+**Artifacts:**
 
 ```text
 .agentforge/runs/<run_id>/
@@ -45,7 +47,7 @@ agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoin
   final_report.md
 ```
 
-**Default MVP agents:**
+**Default agents:**
 
 - Planner Agent
 - Frontend Agent
@@ -53,38 +55,61 @@ agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoin
 - Testing Agent
 - Reviewer Agent
 
-## Phase 2: Tool System
+## Phase 2: Read-Only Tool System
 
-**Goal:** Let agents use controlled tools.
+**Goal:** Let agents inspect a project directory through controlled, read-only tools.
 
-**Initial read-only tools:**
+**Status:** Implemented.
+
+**Implemented tools:**
 
 - `list_files`
 - `read_file`
 - `search_files`
 - `inspect_tree`
 
-**Important constraint:** No file writing yet.
+**Implemented features:**
 
-The purpose of this phase is to let agents understand a project directory before proposing changes.
+- Tool registry
+- Agent `allowed_tools` validation
+- Deterministic tool context gathered by the runner
+- Project-root sandboxing
+- Path traversal rejection
+- `tool_calls.json` artifact
+- `--project-root` CLI option
+- `--no-project-context` CLI option
+- Default project root behavior using the current working directory
+
+**Important constraints:**
+
+- No file writing.
+- No patch generation.
+- No test execution tool.
+- No dynamic agent-decided tool calling.
+
+Phase 2 lets agents understand a project directory before proposing plans. It does not let agents modify files.
 
 ## Phase 3: Patch Proposal System
 
 **Goal:** Let agents propose code changes without immediately applying them.
 
+**Status:** Planned.
+
 **Features:**
 
 - Generate patch proposals
-- Write `.diff` files
+- Write `.diff` files as run artifacts
 - Show patch summaries
 - Associate patches with workflow runs
 - Require approval before applying patches
 
-The system should still avoid direct autonomous file modification.
+The system should still avoid direct autonomous source modification.
 
 ## Phase 4: Human-Approved Patch Application
 
 **Goal:** Safely apply approved patches.
+
+**Status:** Planned.
 
 **Features:**
 
@@ -105,6 +130,8 @@ agentforge patch apply <patch_id>
 
 **Goal:** Run tests and let a debugging agent respond to failures.
 
+**Status:** Planned.
+
 **Features:**
 
 - `run_tests` tool
@@ -117,7 +144,7 @@ agentforge patch apply <patch_id>
 **Example future flow:**
 
 ```text
-Apply patch
+Apply approved patch
   |
   v
 Run tests
@@ -132,9 +159,28 @@ User approves or rejects
 Run tests again
 ```
 
+## Future Phase: Agent-Decided Dynamic Tool Calling
+
+**Goal:** Allow an agent step to request tool calls dynamically during model interaction.
+
+**Status:** Planned.
+
+This is intentionally not part of Phase 2. Phase 2 uses deterministic runner-gathered context based on `allowed_tools`.
+
+**Potential features:**
+
+- Tool call request schema
+- Tool call result messages
+- Tool permission enforcement
+- Tool call limits
+- Safer error handling for model-requested tools
+- Richer tool observability
+
 ## Phase 6: Python SDK
 
 **Goal:** Make AgentForge usable as a Python library.
+
+**Status:** Planned.
 
 Example:
 
@@ -152,6 +198,8 @@ The SDK should expose the core workflow engine without requiring the CLI.
 
 **Goal:** Add a local dashboard for visual workflow execution.
 
+**Status:** Planned.
+
 **Features:**
 
 - Run workflow from UI
@@ -159,6 +207,7 @@ The SDK should expose the core workflow engine without requiring the CLI.
 - Enable or disable agents
 - Inspect shared state
 - Inspect trace logs
+- Inspect tool call logs
 - Review patches
 - View test output
 - Compare runs
@@ -168,6 +217,8 @@ The dashboard should come after the CLI and SDK are stable.
 ## Phase 8: Dockerized Local Platform
 
 **Goal:** Let users run the full platform locally with Docker.
+
+**Status:** Planned.
 
 Example command:
 
@@ -181,11 +232,13 @@ Expected local interface:
 http://localhost:3000
 ```
 
-This phase supports the long-term goal of a locally hosted, free tool where users bring their own API keys.
+This phase supports the long-term goal of a locally hosted tool where users bring their own API keys.
 
 ## Phase 9: Custom Agent Creation
 
 **Goal:** Let users create and configure their own agents.
+
+**Status:** Planned.
 
 **Features:**
 
@@ -197,11 +250,13 @@ This phase supports the long-term goal of a locally hosted, free tool where user
 - Import/export agent configs
 - Save agents as YAML
 
-This phase moves AgentForge closer to the original plug-and-play agent platform vision.
+This phase moves AgentForge closer to a plug-and-play agent workflow platform.
 
 ## Phase 10: Workflow Library
 
 **Goal:** Provide reusable development workflows.
+
+**Status:** Planned.
 
 **Possible workflows:**
 
@@ -219,6 +274,8 @@ This phase moves AgentForge closer to the original plug-and-play agent platform 
 
 **Goal:** Make AgentForge useful for less technical users.
 
+**Status:** Planned.
+
 **Features:**
 
 - Plain-English project intake
@@ -228,7 +285,7 @@ This phase moves AgentForge closer to the original plug-and-play agent platform 
 - Simplified explanations of technical decisions
 - Safer defaults
 
-This phase supports the broader goal of making high-quality code generation more accessible to non-technical users.
+This phase supports the broader goal of making high-quality software workflows more accessible to non-technical users.
 
 ## Long-Term Vision
 

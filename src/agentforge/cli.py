@@ -26,10 +26,30 @@ def run(
         str,
         typer.Option("--input", help="Request for the workflow to process."),
     ],
+    project_root: Annotated[
+        Path | None,
+        typer.Option("--project-root", help="Project directory exposed to read-only tools."),
+    ] = None,
+    no_project_context: Annotated[
+        bool,
+        typer.Option("--no-project-context", help="Disable deterministic read-only project tools."),
+    ] = False,
 ) -> None:
     """Run a YAML-defined workflow."""
+    if project_root is not None and no_project_context:
+        typer.echo(
+            "Error: --project-root and --no-project-context cannot be used together.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
     try:
-        result = WorkflowRunner().run(workflow_path, input_text)
+        result = WorkflowRunner().run(
+            workflow_path,
+            input_text,
+            project_root=project_root,
+            use_project_context=not no_project_context,
+        )
     except (ConfigLoadError, WorkflowExecutionError) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1) from error

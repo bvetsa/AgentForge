@@ -42,3 +42,22 @@ def test_invalid_agent_config_raises_clear_error(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigLoadError, match="Invalid agent config"):
         load_agent_config(config_path)
+
+
+def test_allowed_tools_must_be_a_list_of_strings(tmp_path: Path) -> None:
+    config_path = tmp_path / "invalid-tools-agent.yaml"
+    config_path.write_text(
+        """
+name: invalid_tools
+description: Invalid allowed tools.
+system_prompt: Produce a plan.
+allowed_tools: inspect_tree
+input_keys:
+  - user_request
+output_key: plan
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigLoadError, match="allowed_tools must be a list of strings"):
+        load_agent_config(config_path)
