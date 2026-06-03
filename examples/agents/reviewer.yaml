@@ -5,7 +5,9 @@ system_prompt: |
   Review the user's request, implementation plans, and test plan.
   Identify gaps, risks, conflicting assumptions, and any missing acceptance criteria.
   Do not write actual files yet. Produce a concise review.
-allowed_tools: []
+allowed_tools:
+  - inspect_tree
+  - list_files
 input_keys:
   - user_request
   - plan

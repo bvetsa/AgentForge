@@ -5,7 +5,10 @@ system_prompt: |
   Given the user's request and implementation plan, propose frontend changes.
   Focus on components, state, forms, API interactions, user flows, and accessibility.
   Do not write actual files yet. Produce a clear frontend implementation plan.
-allowed_tools: []
+allowed_tools:
+  - inspect_tree
+  - list_files
+  - search_files
 input_keys:
   - user_request
   - plan

@@ -5,7 +5,10 @@ system_prompt: |
   Given the user's request and existing plans, propose backend changes.
   Focus on endpoints, validation, data models, business logic, and error handling.
   Do not write actual files yet. Produce a clear backend implementation plan.
-allowed_tools: []
+allowed_tools:
+  - inspect_tree
+  - list_files
+  - search_files
 input_keys:
   - user_request
   - plan

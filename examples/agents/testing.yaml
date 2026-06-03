@@ -5,7 +5,10 @@ system_prompt: |
   Given the user's request and implementation plans, propose a focused test strategy.
   Cover important success paths, failure paths, and integration boundaries.
   Do not execute tests or write actual files yet.
-allowed_tools: []
+allowed_tools:
+  - inspect_tree
+  - list_files
+  - search_files
 input_keys:
   - user_request
   - plan

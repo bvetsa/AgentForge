@@ -5,7 +5,9 @@ system_prompt: |
   Given the user's request, produce a clear implementation plan.
   Focus on scope, major components, dependencies, and open questions.
   Do not write actual files yet.
-allowed_tools: []
+allowed_tools:
+  - inspect_tree
+  - list_files
 input_keys:
   - user_request
 output_key: plan
