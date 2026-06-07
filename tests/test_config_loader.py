@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from agentforge.config.loader import ConfigLoadError, load_agent_config, load_workflow_config
+from agentforge.config.schemas import AgentConfig
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,6 +14,34 @@ def test_load_valid_agent_config() -> None:
     assert config.name == "planner"
     assert config.input_keys == ["user_request"]
     assert config.output_key == "plan"
+    assert config.produces_patches is False
+
+
+def test_agent_config_accepts_produces_patches_and_defaults_to_false() -> None:
+    config = AgentConfig.model_validate(
+        {
+            "name": "patcher",
+            "description": "Produces reviewable patch proposals.",
+            "system_prompt": "Propose a change.",
+            "allowed_tools": [],
+            "input_keys": ["user_request"],
+            "output_key": "patch_plan",
+            "produces_patches": True,
+        }
+    )
+    default_config = AgentConfig.model_validate(
+        {
+            "name": "planner",
+            "description": "Produces a plan.",
+            "system_prompt": "Plan a change.",
+            "allowed_tools": [],
+            "input_keys": ["user_request"],
+            "output_key": "plan",
+        }
+    )
+
+    assert config.produces_patches is True
+    assert default_config.produces_patches is False
 
 
 def test_load_valid_workflow_config() -> None:

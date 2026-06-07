@@ -44,6 +44,8 @@ def test_basic_workflow_run_uses_current_directory_for_project_context(
 
     expected_files = {
         "input.txt",
+        "patch_manifest.json",
+        "patches",
         "state.json",
         "trace.json",
         "tool_calls.json",
@@ -56,13 +58,31 @@ def test_basic_workflow_run_uses_current_directory_for_project_context(
     saved_tool_calls = json.loads(
         (result.run_directory / "tool_calls.json").read_text(encoding="utf-8")
     )
+    patch_manifest = json.loads(
+        (result.run_directory / "patch_manifest.json").read_text(encoding="utf-8")
+    )
     final_report = (result.run_directory / "final_report.md").read_text(encoding="utf-8")
 
     assert saved_state == result.state
     assert saved_trace == result.trace_events
     assert saved_tool_calls == result.tool_calls
+    assert patch_manifest == result.patch_proposals
+    assert [proposal["agent_name"] for proposal in patch_manifest] == [
+        "frontend",
+        "backend",
+        "testing",
+    ]
+    for proposal in patch_manifest:
+        patch_path = result.run_directory / proposal["patch_file"]
+        assert proposal["status"] == "proposed"
+        assert proposal["patch_file"].startswith("patches/")
+        assert patch_path.parent == result.run_directory / "patches"
+        assert patch_path.exists()
+        assert patch_path.read_text(encoding="utf-8").startswith("diff --git")
+        assert proposal["patch_file"] in final_report
     assert "basic_feature" in final_report
     assert "Add a todo endpoint to a FastAPI app" in final_report
+    assert "Patch Proposals" in final_report
     for agent_name in ["planner", "frontend", "backend", "testing", "reviewer"]:
         assert f"### {agent_name}" in final_report
 
@@ -108,6 +128,8 @@ def test_workflow_run_with_no_project_context_writes_empty_tool_calls(tmp_path: 
     assert "tool_context" not in result.state["plan"]
     tool_calls_path = result.run_directory / "tool_calls.json"
     assert json.loads(tool_calls_path.read_text(encoding="utf-8")) == []
+    patch_manifest_path = result.run_directory / "patch_manifest.json"
+    assert patch_manifest_path.exists()
 
 
 def test_missing_input_records_failed_trace_and_raises_clear_error(tmp_path: Path) -> None:
@@ -152,3 +174,70 @@ agents:
             "timestamp": saved_trace[0]["timestamp"],
         }
     ]
+    patch_manifest_path = error.value.run_directory / "patch_manifest.json"
+    assert json.loads(patch_manifest_path.read_text(encoding="utf-8")) == []
+
+
+def test_patch_manifest_contains_empty_list_when_no_patches_are_generated(tmp_path: Path) -> None:
+    agent_path = tmp_path / "planner.yaml"
+    agent_path.write_text(
+        """
+name: planner
+description: Produces a plan only.
+system_prompt: Produce a plan.
+allowed_tools: []
+input_keys:
+  - user_request
+output_key: plan
+""".strip(),
+        encoding="utf-8",
+    )
+    workflow_path = tmp_path / "planning-workflow.yaml"
+    workflow_path.write_text(
+        """
+name: planning_only
+description: Demonstrates a workflow with no patch-producing agents.
+agents:
+  - planner.yaml
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = WorkflowRunner(runs_directory=tmp_path / ".agentforge/runs")
+
+    result = runner.run(
+        workflow_path,
+        "Plan a todo endpoint",
+        use_project_context=False,
+    )
+
+    patch_manifest_path = result.run_directory / "patch_manifest.json"
+    patch_manifest = json.loads(patch_manifest_path.read_text(encoding="utf-8"))
+    final_report = (result.run_directory / "final_report.md").read_text(encoding="utf-8")
+
+    assert patch_manifest == []
+    assert result.patch_proposals == []
+    assert (result.run_directory / "patches").exists()
+    assert list((result.run_directory / "patches").iterdir()) == []
+    assert "No patch proposals were generated." in final_report
+
+
+def test_workflow_run_does_not_modify_sample_project_files(tmp_path: Path) -> None:
+    sample_project = PROJECT_ROOT / "examples/sample_project"
+    before = _snapshot_project_files(sample_project)
+    runner = WorkflowRunner(runs_directory=tmp_path / ".agentforge/runs")
+
+    runner.run(
+        PROJECT_ROOT / "examples/workflows/basic_feature.yaml",
+        "Add a todo endpoint to a FastAPI app",
+        project_root=sample_project,
+    )
+
+    assert _snapshot_project_files(sample_project) == before
+
+
+def _snapshot_project_files(project_root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(project_root).as_posix(): path.read_bytes()
+        for path in project_root.rglob("*")
+        if path.is_file()
+    }
