@@ -30,6 +30,10 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
+## Continuous Integration
+
+GitHub Actions runs CI on pull requests and pushes to `main`. The workflow installs AgentForge with development dependencies, then runs `pytest`, `ruff check .`, and a CLI smoke test against `examples/workflows/basic_feature.yaml`.
+
 ## CLI Usage
 
 Run a workflow with the current working directory as project context:
