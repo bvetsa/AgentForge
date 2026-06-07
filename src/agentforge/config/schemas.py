@@ -16,6 +16,7 @@ class AgentConfig(BaseModel):
     allowed_tools: list[str]
     input_keys: list[str]
     output_key: str = Field(min_length=1)
+    produces_patches: bool = False
 
     @field_validator("allowed_tools", mode="before")
     @classmethod
