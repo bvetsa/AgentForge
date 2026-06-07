@@ -13,6 +13,7 @@ from agentforge.core.trace import ToolCallLog, TraceLog
 from agentforge.core.workflow import Workflow
 from agentforge.llm.base import LLMClient
 from agentforge.llm.mock import MockLLMClient
+from agentforge.patches import PatchProposal, create_mock_patch_proposal
 from agentforge.tools import (
     ToolError,
     ToolRegistry,
@@ -38,6 +39,7 @@ class RunResult:
     state: dict[str, str]
     trace_events: list[dict[str, object]]
     tool_calls: list[dict[str, object]]
+    patch_proposals: list[dict[str, object]]
     run_directory: Path
 
 
@@ -67,6 +69,7 @@ class WorkflowRunner:
         tool_registry = self._create_tool_registry(project_root, use_project_context)
         tool_call_log = ToolCallLog()
         agent_outputs: list[tuple[str, str]] = []
+        patch_proposals: list[PatchProposal] = []
 
         for agent in workflow.agents:
             try:
@@ -90,6 +93,7 @@ class WorkflowRunner:
                     trace_log,
                     agent_outputs,
                     tool_call_log,
+                    patch_proposals,
                 )
                 raise WorkflowExecutionError(
                     f"Workflow '{workflow.config.name}' failed: {error}. "
@@ -99,6 +103,13 @@ class WorkflowRunner:
 
             state.set_output(agent.config.output_key, output)
             agent_outputs.append((agent.config.name, output))
+            if agent.config.produces_patches:
+                patch_proposals.append(
+                    create_mock_patch_proposal(
+                        agent.config,
+                        sequence=len(patch_proposals) + 1,
+                    )
+                )
             trace_log.append_success(agent.config)
 
         run_directory = self._write_artifacts(
@@ -109,6 +120,7 @@ class WorkflowRunner:
             trace_log,
             agent_outputs,
             tool_call_log,
+            patch_proposals,
         )
         return RunResult(
             run_id=run_id,
@@ -116,6 +128,7 @@ class WorkflowRunner:
             state=state.to_dict(),
             trace_events=trace_log.to_list(),
             tool_calls=tool_call_log.to_list(),
+            patch_proposals=[proposal.model_dump() for proposal in patch_proposals],
             run_directory=run_directory,
         )
 
@@ -128,6 +141,7 @@ class WorkflowRunner:
         trace_log: TraceLog,
         agent_outputs: list[tuple[str, str]],
         tool_call_log: ToolCallLog,
+        patch_proposals: list[PatchProposal],
     ) -> Path:
         return self.artifact_writer.write(
             run_id=run_id,
@@ -137,6 +151,7 @@ class WorkflowRunner:
             trace_events=trace_log.to_list(),
             agent_outputs=agent_outputs,
             tool_calls=tool_call_log.to_list(),
+            patch_proposals=patch_proposals,
         )
 
     @staticmethod

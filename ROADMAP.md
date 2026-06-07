@@ -93,15 +93,24 @@ Phase 2 lets agents understand a project directory before proposing plans. It do
 
 **Goal:** Let agents propose code changes without immediately applying them.
 
-**Status:** Planned.
+**Status:** Implemented.
 
-**Features:**
+**Implemented features:**
 
-- Generate patch proposals
-- Write `.diff` files as run artifacts
-- Show patch summaries
-- Associate patches with workflow runs
-- Require approval before applying patches
+- Agent `produces_patches` config field, defaulting to `false`
+- Deterministic mock patch proposal generation for patch-producing agents
+- Readable unified-diff-like files written under `.agentforge/runs/<run_id>/patches/`
+- Run-level `patch_manifest.json` artifact
+- `patch_manifest.json` always written, with `[]` when no patches are proposed
+- Patch proposal summaries and patch file paths in `final_report.md`
+
+**Important constraints:**
+
+- Patches are artifacts only.
+- Patches are not applied in Phase 3.
+- Project source files are not modified by patch proposal generation.
+- File modification is intentionally deferred to Phase 4.
+- Humans remain in control of future approval and application decisions.
 
 The system should still avoid direct autonomous source modification.
 

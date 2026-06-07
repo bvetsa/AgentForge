@@ -11,3 +11,4 @@ allowed_tools:
 input_keys:
   - user_request
 output_key: plan
+produces_patches: false
