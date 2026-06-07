@@ -2,7 +2,7 @@
 
 ## Current Architecture
 
-AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection.
+AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection and patch proposal artifacts.
 
 ```text
 CLI
@@ -29,13 +29,15 @@ Workflow Runner
  v
 Mock LLM Client
  |
+ +--> Patch Proposal Writer
+ |
  v
 Run Artifacts
 ```
 
-Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs.
+Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`.
 
-AgentForge still does not modify source files, generate patches, call real LLM APIs, run tests as an agent tool, or let agents dynamically choose tools.
+AgentForge still does not apply patches, modify source files, call real LLM APIs, run tests as an agent tool, or let agents dynamically choose tools. File modification is intentionally deferred to Phase 4 so humans remain in control.
 
 ## Phase 2 Tool Flow
 
@@ -51,7 +53,8 @@ Detailed flow:
 4. The runner calls the allowed read-only tools deterministically.
 5. Tool output is formatted into `tool_context`.
 6. The mock LLM client receives the agent config plus normal state inputs and `tool_context`.
-7. Agent outputs, trace events, and tool call records are written to run artifacts.
+7. Agents configured with `produces_patches: true` generate deterministic patch proposal artifacts.
+8. Agent outputs, trace events, tool call records, patch files, and the patch manifest are written to run artifacts.
 
 Dynamic LLM-directed tool calling is intentionally deferred to a later phase.
 
@@ -108,6 +111,7 @@ Responsibilities:
 - Store agent configuration
 - Identify required input keys
 - Declare allowed read-only tools
+- Declare whether it produces patch proposal artifacts
 - Return output for its configured output key
 
 In the current implementation, agents use a mock LLM client. Future versions may call real model providers.
@@ -137,6 +141,7 @@ Responsibilities:
 - Run agents in order
 - Check that required input keys exist
 - Update state after each agent
+- Generate deterministic patch proposals for patch-producing agents
 - Record trace events
 - Record tool call events
 - Save run artifacts
@@ -269,6 +274,20 @@ Each record includes:
 
 This data is written to `tool_calls.json`. It gives future dashboards a clean observability surface for showing which tools ran, what context was gathered, and where failures occurred.
 
+### Patch Proposal Writer
+
+The `src/agentforge/patches` package contains the Phase 3 patch proposal system.
+
+Current modules:
+
+- `models.py` - `PatchProposal` artifact model
+- `writer.py` - deterministic mock proposal creation and patch file writing
+- `__init__.py` - public exports
+
+Patch-producing agents emit one deterministic mock proposal per successful agent step. Each proposal is saved as a readable unified-diff-like file under `patches/`, and every run writes `patch_manifest.json`.
+
+The patch writer only writes under the run directory. It does not apply diffs, open Git, execute tests, or modify the inspected project root.
+
 ### Mock LLM Client
 
 The mock LLM client simulates LLM responses for local testing.
@@ -297,7 +316,14 @@ input.txt
 state.json
 trace.json
 tool_calls.json
+patch_manifest.json
 final_report.md
+```
+
+Patch proposal files are written under:
+
+```text
+patches/
 ```
 
 Responsibilities:
@@ -306,6 +332,7 @@ Responsibilities:
 - Save final shared state
 - Save trace events
 - Save tool call records
+- Save patch proposal manifests and diff files
 - Generate a human-readable report
 
 Run artifacts make AgentForge inspectable and reproducible. They are generated output and should not be committed.

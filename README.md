@@ -16,9 +16,11 @@ The long-term goal is to make high-quality AI-assisted software development more
 
 **Phase 2:** Implemented the read-only project inspection tool system.
 
-The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, and writes traceable run artifacts.
+**Phase 3:** Implemented patch proposal artifacts.
 
-AgentForge still does not modify source files, generate patches, execute tests as an agent tool, call real LLM APIs, or let agents dynamically decide which tools to call.
+The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, and writes traceable run artifacts. Agents can now be configured to produce reviewable patch proposal artifacts.
+
+AgentForge still does not apply patches, modify project source files, execute tests as an agent tool, call real LLM APIs, or let agents dynamically decide which tools to call. File modification is intentionally deferred to Phase 4 so humans remain in control.
 
 ## Local Setup
 
@@ -91,7 +93,14 @@ input.txt
 state.json
 trace.json
 tool_calls.json
+patch_manifest.json
 final_report.md
+```
+
+Patch proposal files, when generated, are written under:
+
+```text
+.agentforge/runs/<run_id>/patches/
 ```
 
 Artifact purposes:
@@ -100,15 +109,18 @@ Artifact purposes:
 - `state.json` stores the final shared workflow state.
 - `trace.json` stores agent execution events.
 - `tool_calls.json` stores deterministic tool call records, including agent, tool, status, input, output preview, timestamp, and error when applicable.
+- `patch_manifest.json` stores the run-level list of patch proposals. It is always written and contains `[]` when no patches are proposed.
 - `final_report.md` stores the human-readable agent output report.
 
-Run artifacts are generated output, not source files. They should not be committed.
+Patch proposals are artifacts only. The current system writes readable unified-diff-like files for review, but it does not apply them or modify files in the inspected project root. Run artifacts are generated output, not source files. They should not be committed.
 
 ## Core Ideas
 
 ### Agents
 
 Agents are small specialist roles. Each agent has a name, description, system prompt, input keys, output key, and allowed tools.
+
+Agents may also set `produces_patches: true` to emit deterministic Phase 3 patch proposal artifacts. The default is `false`.
 
 Example agents:
 
@@ -156,7 +168,7 @@ Testing Agent
 Reviewer Agent
 ```
 
-This workflow does not modify files. It inspects project context, then produces planning and review artifacts.
+This workflow does not modify files. It inspects project context, then produces planning, review, and patch proposal artifacts for human review.
 
 ## Smoke Tests
 

@@ -18,7 +18,9 @@ Phase 1 implemented the YAML-driven workflow runner.
 
 Phase 2 implemented a read-only project inspection tool system. The runner can now gather deterministic project context for agents from controlled filesystem tools before calling the mock LLM client.
 
-The current scope is still intentionally limited. AgentForge does not modify source files, generate patches, execute tests as an agent tool, integrate real LLM APIs, provide a dashboard, or let agents dynamically decide which tools to call.
+Phase 3 implemented patch proposal artifacts. Patch-producing agents can now emit deterministic, reviewable diff files and a run-level patch manifest.
+
+The current scope is still intentionally limited. AgentForge does not apply patches, modify source files, execute tests as an agent tool, integrate real LLM APIs, provide a dashboard, or let agents dynamically decide which tools to call. File modification is intentionally deferred to Phase 4 so humans remain in control.
 
 ## User Story
 
@@ -36,6 +38,8 @@ Then AgentForge runs the configured agents in order, uses the current working di
   state.json
   trace.json
   tool_calls.json
+  patch_manifest.json
+  patches/
   final_report.md
 ```
 
@@ -87,6 +91,7 @@ Each agent reads specific keys from shared state and writes one new output key b
 - Read-only project inspection tools
 - Tool registry
 - Tool call logging
+- Patch proposal artifacts
 - Saved run artifacts
 - Basic tests
 
@@ -99,7 +104,7 @@ AgentForge currently does not include:
 - Dashboard
 - SDK
 - Docker
-- Code patching
+- Patch application
 - Filesystem modification by agents
 - Git integration
 - Test execution as an agent tool
@@ -126,6 +131,10 @@ Required fields:
 - `output_key`
 - `allowed_tools`
 
+Optional fields:
+
+- `produces_patches` defaults to `false`
+
 Example:
 
 ```yaml
@@ -141,6 +150,7 @@ allowed_tools:
   - inspect_tree
   - list_files
   - search_files
+produces_patches: true
 ```
 
 ### Workflow
@@ -218,6 +228,33 @@ The runner deterministically gathers tool context from this list before each age
 
 `allowed_tools` must be a list of strings.
 
+### Patch Proposal
+
+A patch proposal is a reviewable code change artifact. Phase 3 generates deterministic mock proposals for agents configured with:
+
+```yaml
+produces_patches: true
+```
+
+Each proposal includes:
+
+- `id`
+- `agent_name`
+- `title`
+- `description`
+- `target_file`
+- `patch_file`
+- `status`
+- `diff`
+
+Patch files use a readable unified-diff-like format and are written under:
+
+```text
+.agentforge/runs/<run_id>/patches/
+```
+
+Patch proposals are not applied. They do not modify the inspected `project_root`; they are generated artifacts for human review.
+
 ### Trace
 
 Trace records each step of a workflow run.
@@ -276,6 +313,22 @@ When project context is disabled, `tool_calls.json` contains:
 []
 ```
 
+## Patch Artifact Contract
+
+Every run writes:
+
+```text
+patch_manifest.json
+```
+
+When patches are proposed, each manifest entry references a diff file under `patches/`. When no patches are proposed, `patch_manifest.json` contains:
+
+```json
+[]
+```
+
+The manifest is part of the run artifact contract and is intended for future review and approval flows.
+
 ## Safety Requirements
 
 - Tools are read-only.
@@ -284,6 +337,9 @@ When project context is disabled, `tool_calls.json` contains:
 - Absolute paths must be rejected for file reads.
 - Directory reads through `read_file` must be rejected.
 - Large files should be rejected or skipped according to tool behavior.
+- Patch proposals must be written only as run artifacts.
+- Patch proposals must not be applied in Phase 3.
+- Project source files must not be modified by patch proposal generation.
 - Generated run artifacts under `.agentforge/runs/` are not source files and should not be committed.
 
 ## Run Artifacts
@@ -301,6 +357,7 @@ input.txt
 state.json
 trace.json
 tool_calls.json
+patch_manifest.json
 final_report.md
 ```
 
@@ -310,6 +367,7 @@ Responsibilities:
 - Save final shared state
 - Save trace events
 - Save tool call records
+- Save patch proposal manifests and patch files
 - Generate a human-readable report
 
 Run artifacts make AgentForge inspectable and reproducible.
