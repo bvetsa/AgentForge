@@ -13,3 +13,4 @@ input_keys:
   - user_request
   - plan
 output_key: frontend_plan
+produces_patches: true

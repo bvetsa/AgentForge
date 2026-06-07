@@ -14,3 +14,4 @@ input_keys:
   - plan
   - frontend_plan
 output_key: backend_plan
+produces_patches: true
