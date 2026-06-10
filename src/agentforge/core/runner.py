@@ -13,7 +13,7 @@ from agentforge.core.trace import ToolCallLog, TraceLog
 from agentforge.core.workflow import Workflow
 from agentforge.llm.base import LLMClient
 from agentforge.llm.mock import MockLLMClient
-from agentforge.patches import PatchProposal, create_mock_patch_proposal
+from agentforge.patches import DeterministicPatchGenerator, PatchGenerator, PatchProposal
 from agentforge.tools import (
     ToolError,
     ToolRegistry,
@@ -49,9 +49,11 @@ class WorkflowRunner:
     def __init__(
         self,
         llm_client: LLMClient | None = None,
+        patch_generator: PatchGenerator | None = None,
         runs_directory: str | Path = ".agentforge/runs",
     ) -> None:
         self.llm_client = llm_client or MockLLMClient()
+        self.patch_generator = patch_generator or DeterministicPatchGenerator()
         self.artifact_writer = ArtifactWriter(runs_directory)
 
     def run(
@@ -105,7 +107,7 @@ class WorkflowRunner:
             agent_outputs.append((agent.config.name, output))
             if agent.config.produces_patches:
                 patch_proposals.append(
-                    create_mock_patch_proposal(
+                    self.patch_generator.create(
                         agent.config,
                         sequence=len(patch_proposals) + 1,
                     )

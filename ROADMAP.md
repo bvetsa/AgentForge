@@ -118,22 +118,38 @@ The system should still avoid direct autonomous source modification.
 
 **Goal:** Safely apply approved patches.
 
-**Status:** Planned.
+**Status:** Implemented.
 
-**Features:**
+**Implemented features:**
 
-- Patch review command
-- Patch apply command
-- Patch rejection flow
-- Backup or rollback strategy
-- Clear reporting of modified files
+- `agentforge patch list <run_id>`
+- `agentforge patch show <run_id> <patch_id>`
+- `agentforge patch apply <run_id> <patch_id> --project-root <path>`
+- Human-approved application of one selected patch proposal
+- `patch_manifest.json` status update from `proposed` to `applied`
+- Missing patch ID and missing patch file errors
+- Rejection of absolute patch target paths
+- Rejection of `../` path traversal
+- Rejection of targets that resolve outside `project_root`
+- Deterministic mock patch generation isolated from patch application
 
-**Example future commands:**
+**Commands:**
 
 ```bash
-agentforge patch review
-agentforge patch apply <patch_id>
+agentforge patch list <run_id>
+agentforge patch show <run_id> <patch_id>
+agentforge patch apply <run_id> <patch_id> --project-root examples/sample_project
 ```
+
+**Important constraints:**
+
+- Patch application is never automatic.
+- `--project-root` is required for patch application.
+- Applying one patch does not apply every proposal in the run.
+- The current mock generator uses sample-project fixture targets only to test the infrastructure.
+- Intelligent file target selection is not implemented yet.
+- Phase 4 does not run tests after applying patches.
+- Phase 4 does not commit changes to Git.
 
 ## Phase 5: Test Execution and Debugging Loop
 

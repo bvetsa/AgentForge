@@ -20,7 +20,9 @@ Phase 2 implemented a read-only project inspection tool system. The runner can n
 
 Phase 3 implemented patch proposal artifacts. Patch-producing agents can now emit deterministic, reviewable diff files and a run-level patch manifest.
 
-The current scope is still intentionally limited. AgentForge does not apply patches, modify source files, execute tests as an agent tool, integrate real LLM APIs, provide a dashboard, or let agents dynamically decide which tools to call. File modification is intentionally deferred to Phase 4 so humans remain in control.
+Phase 4 implemented human-approved patch review and application commands. A user can list proposals for a run, inspect one diff, and explicitly apply one selected patch to a provided project root.
+
+The current scope is still intentionally limited. AgentForge does not automatically apply patches, execute tests as an agent tool, commit changes to Git, integrate real LLM APIs, provide a dashboard, or let agents dynamically decide which tools to call. File modification only happens after an explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command.
 
 ## User Story
 
@@ -53,6 +55,14 @@ If I want to disable project context entirely, I can run:
 
 ```bash
 agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app" --no-project-context
+```
+
+Then I can review and apply patch proposals from that run:
+
+```bash
+agentforge patch list <run_id>
+agentforge patch show <run_id> <patch_id>
+agentforge patch apply <run_id> <patch_id> --project-root examples/sample_project
 ```
 
 ## Workflow
@@ -92,6 +102,7 @@ Each agent reads specific keys from shared state and writes one new output key b
 - Tool registry
 - Tool call logging
 - Patch proposal artifacts
+- Human-approved patch review and application commands
 - Saved run artifacts
 - Basic tests
 
@@ -104,7 +115,7 @@ AgentForge currently does not include:
 - Dashboard
 - SDK
 - Docker
-- Patch application
+- Automatic patch application
 - Filesystem modification by agents
 - Git integration
 - Test execution as an agent tool
@@ -253,7 +264,21 @@ Patch files use a readable unified-diff-like format and are written under:
 .agentforge/runs/<run_id>/patches/
 ```
 
-Patch proposals are not applied. They do not modify the inspected `project_root`; they are generated artifacts for human review.
+Patch proposals are not applied during workflow execution. They do not modify the inspected `project_root`; they are generated artifacts for human review.
+
+Phase 4 adds these review commands:
+
+```bash
+agentforge patch list <run_id>
+agentforge patch show <run_id> <patch_id>
+agentforge patch apply <run_id> <patch_id> --project-root <path>
+```
+
+`patch apply` applies only the selected proposal after explicit command invocation and changes that proposal's manifest status from `proposed` to `applied`.
+
+Patch proposal `target_file` values must be project-relative source or test files. The current deterministic mock generator uses sample-project fixture targets such as `src/app.py`, `src/models.py`, and `tests/test_app.py` only to exercise patch artifact and application behavior. Intelligent target selection is not implemented yet. Future versions will use project inspection, dynamic tool calling, and real model output to choose target files.
+
+Patch proposals must not point at `proposed/*.txt` files inside the project root.
 
 ### Trace
 
@@ -327,7 +352,7 @@ When patches are proposed, each manifest entry references a diff file under `pat
 []
 ```
 
-The manifest is part of the run artifact contract and is intended for future review and approval flows.
+The manifest is part of the run artifact contract and supports the Phase 4 review and approval flow. Patch statuses begin as `proposed`; after a successful explicit apply command, the selected proposal is updated to `applied`.
 
 ## Safety Requirements
 
@@ -338,7 +363,17 @@ The manifest is part of the run artifact contract and is intended for future rev
 - Directory reads through `read_file` must be rejected.
 - Large files should be rejected or skipped according to tool behavior.
 - Patch proposals must be written only as run artifacts.
-- Patch proposals must not be applied in Phase 3.
+- Patch proposals must not be applied during workflow execution.
+- Patch application must require `--project-root`.
+- Patch application must apply only the selected patch ID.
+- Patch target paths must be relative paths inside `project_root`.
+- Absolute patch target paths must be rejected.
+- `../` traversal in patch target paths must be rejected.
+- `proposed/` patch targets inside `project_root` must be rejected.
+- Patch targets that resolve outside `project_root` must be rejected.
+- Missing patch IDs and missing patch files must fail with clear errors.
+- Phase 4 must not run tests after applying a patch.
+- Phase 4 must not commit changes to Git.
 - Project source files must not be modified by patch proposal generation.
 - Generated run artifacts under `.agentforge/runs/` are not source files and should not be committed.
 
@@ -378,7 +413,7 @@ Run artifacts make AgentForge inspectable and reproducible.
 2. Prefer explicit workflows over hidden autonomous behavior.
 3. Make every agent output inspectable.
 4. Use structured state instead of unstructured message passing.
-5. Require human approval before future file modifications.
+5. Require human approval before file modifications.
 6. Use mock LLMs before real LLM APIs.
 7. Keep early phases small enough to fully understand.
 8. Treat agents as composable modules, not magical autonomous workers.
