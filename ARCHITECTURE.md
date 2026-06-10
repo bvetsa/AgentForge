@@ -2,7 +2,7 @@
 
 ## Current Architecture
 
-AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection and patch proposal artifacts.
+AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection, patch proposal artifacts, and human-approved patch application.
 
 ```text
 CLI
@@ -33,11 +33,17 @@ Mock LLM Client
  |
  v
 Run Artifacts
+ |
+ v
+Patch Review CLI
+ |
+ v
+Selected Project File
 ```
 
-Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`.
+Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal.
 
-AgentForge still does not apply patches, modify source files, call real LLM APIs, run tests as an agent tool, or let agents dynamically choose tools. File modification is intentionally deferred to Phase 4 so humans remain in control.
+AgentForge still does not automatically apply patches, call real LLM APIs, run tests as an agent tool, commit changes to Git, or let agents dynamically choose tools. Source modification requires a human to invoke `agentforge patch apply` with a run ID, patch ID, and project root.
 
 ## Phase 2 Tool Flow
 
@@ -53,10 +59,28 @@ Detailed flow:
 4. The runner calls the allowed read-only tools deterministically.
 5. Tool output is formatted into `tool_context`.
 6. The mock LLM client receives the agent config plus normal state inputs and `tool_context`.
-7. Agents configured with `produces_patches: true` generate deterministic patch proposal artifacts.
+7. Agents configured with `produces_patches: true` ask the configured patch generator for deterministic mock patch proposal artifacts.
 8. Agent outputs, trace events, tool call records, patch files, and the patch manifest are written to run artifacts.
 
-Dynamic LLM-directed tool calling is intentionally deferred to a later phase.
+Dynamic LLM-directed tool calling and intelligent patch target selection are intentionally deferred to later phases.
+
+## Phase 4 Patch Flow
+
+```text
+CLI -> Patch Review Service -> Run Patch Manifest -> Selected Diff -> Project Root
+```
+
+Detailed flow:
+
+1. The user runs `agentforge patch list <run_id>` to see proposal IDs, agents, targets, statuses, and titles.
+2. The user runs `agentforge patch show <run_id> <patch_id>` to inspect one diff.
+3. The user runs `agentforge patch apply <run_id> <patch_id> --project-root <path>` to approve one selected patch.
+4. The patch review service validates the run ID, manifest, patch ID, patch file path, and target path.
+5. The target path must be relative, must not contain `../`, must not target `proposed/`, and must resolve inside `project_root`.
+6. The service applies the unified diff to the manifest's target file.
+7. After the file write succeeds, the selected manifest entry is updated from `proposed` to `applied`.
+
+Phase 4 does not run tests, start a debugging loop, or commit changes to Git.
 
 ## Components
 
@@ -68,6 +92,14 @@ Primary command:
 
 ```bash
 agentforge run <workflow_path> --input "<request>"
+```
+
+Patch review commands:
+
+```bash
+agentforge patch list <run_id>
+agentforge patch show <run_id> <patch_id>
+agentforge patch apply <run_id> <patch_id> --project-root <path>
 ```
 
 Project context options:
@@ -84,6 +116,9 @@ Responsibilities:
 - Validate mutually exclusive project context flags
 - Invoke the workflow runner
 - Print the run directory and final status
+- List patch proposal metadata for a previous run
+- Print one selected patch diff
+- Apply one selected patch only after explicit user invocation
 
 The CLI stays thin. Most logic lives in the core engine.
 
@@ -274,19 +309,23 @@ Each record includes:
 
 This data is written to `tool_calls.json`. It gives future dashboards a clean observability surface for showing which tools ran, what context was gathered, and where failures occurred.
 
-### Patch Proposal Writer
+### Patch Proposal System
 
-The `src/agentforge/patches` package contains the Phase 3 patch proposal system.
+The `src/agentforge/patches` package contains the patch proposal and review system.
 
 Current modules:
 
+- `mock_generator.py` - deterministic sample-project patch generation for tests and examples
 - `models.py` - `PatchProposal` artifact model
-- `writer.py` - deterministic mock proposal creation and patch file writing
+- `review.py` - manifest loading, diff inspection, safe selected-patch application
+- `writer.py` - patch file writing under the run artifact directory
 - `__init__.py` - public exports
 
-Patch-producing agents emit one deterministic mock proposal per successful agent step. Each proposal is saved as a readable unified-diff-like file under `patches/`, and every run writes `patch_manifest.json`.
+Patch-producing agents emit one deterministic mock proposal per successful agent step through the configured `PatchGenerator`. The default `DeterministicPatchGenerator` uses an explicit sample-project target list so tests can apply real diffs to real files. This is temporary mock behavior, not a production file-selection strategy and not a mapping from agent names to files.
 
 The patch writer only writes under the run directory. It does not apply diffs, open Git, execute tests, or modify the inspected project root.
+
+The patch review service is independent of patch generation. It applies one selected diff only when the user runs `agentforge patch apply`, using the `target_file` stored in `patch_manifest.json`. It rejects absolute target paths, path traversal, `proposed/` targets, missing patch IDs, missing patch files, and targets that resolve outside `project_root`. It does not run tests or commit changes to Git after applying a patch.
 
 ### Mock LLM Client
 
@@ -393,7 +432,7 @@ The provider layer should allow users to bring their own API keys.
 
 Allows agents to propose file changes as patches instead of directly modifying files.
 
-Design rule: the system should require human approval before applying patches.
+Design rule: the system requires human approval before applying patches. The current CLI supports explicit single-patch application; future phases may add richer review metadata, rollback, and reporting.
 
 ### Test Runner
 
