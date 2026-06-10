@@ -38,6 +38,8 @@ python -m pip install -e ".[dev]"
 
 GitHub Actions runs CI on pull requests and pushes to `main`. The workflow installs AgentForge with development dependencies, then runs `pytest`, `ruff check .`, and a CLI smoke test against `examples/workflows/basic_feature.yaml`.
 
+CI also runs a Phase 4 patch workflow smoke test against `examples/sample_project`. That smoke test runs a workflow, lists generated patches, shows one patch, explicitly applies one selected patch with `--project-root`, and verifies that at least one file under `examples/sample_project` changed.
+
 ## CLI Usage
 
 Run a workflow with the current working directory as project context:
