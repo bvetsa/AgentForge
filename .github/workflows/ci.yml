@@ -105,3 +105,69 @@ jobs:
           for file in changed_files:
               print(f"- {file}")
           PY
+
+      - name: Run Phase 5 test execution smoke test
+        run: |
+          agentforge test detect --project-root examples/sample_project
+
+          # examples/sample_project intentionally has incomplete app dependencies.
+          # Use an explicit safe pytest metadata command so CI verifies Phase 5
+          # command execution and artifact recording without requiring that sample
+          # project's tests to pass.
+          agentforge test run \
+            --project-root examples/sample_project \
+            --command "python -m pytest --version" \
+            --timeout 5
+
+          if [ ! -d ".agentforge/test-runs" ]; then
+            echo "No .agentforge/test-runs directory found"
+            exit 1
+          fi
+
+          TEST_RUN_ID=$(ls -t .agentforge/test-runs | head -n 1)
+
+          if [ -z "$TEST_RUN_ID" ]; then
+            echo "No test run directories found"
+            exit 1
+          fi
+
+          echo "Latest test run: $TEST_RUN_ID"
+
+          TEST_RUN_ID="$TEST_RUN_ID" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run_id = os.environ["TEST_RUN_ID"]
+          run_directory = Path(".agentforge/test-runs") / run_id
+          results_path = run_directory / "test_results.json"
+          output_path = run_directory / "test_output.txt"
+
+          if not results_path.exists():
+              raise SystemExit(f"Missing test results: {results_path}")
+
+          if not output_path.exists():
+              raise SystemExit(f"Missing test output: {output_path}")
+
+          results = json.loads(results_path.read_text())
+
+          expected = {
+              "command_source": "user",
+              "status": "passed",
+              "timed_out": False,
+              "timeout_seconds": 5,
+              "exit_code": 0,
+          }
+
+          for key, value in expected.items():
+              actual = results.get(key)
+              if actual != value:
+                  raise SystemExit(f"Expected {key}={value!r}, got {actual!r}")
+
+          if results.get("selected_command") != ["python", "-m", "pytest", "--version"]:
+              raise SystemExit(
+                  f"Unexpected selected command: {results.get('selected_command')!r}"
+              )
+
+          print("Phase 5 test execution artifact verified")
+          PY
