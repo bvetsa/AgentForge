@@ -1,5 +1,11 @@
 # AgentForge Roadmap
 
+## Project Direction
+
+AgentForge is a CLI-first, local-first developer tool for composable agent workflows. The CLI and core engine should become stable, useful, inspectable, and safe before AgentForge adds SDK or dashboard surfaces.
+
+Completed phases establish workflow execution, read-only project inspection, patch proposal artifacts, and explicit human-approved patch application. Planned phases should keep file modification safety, artifact visibility, and command-line ergonomics as the primary product constraints.
+
 ## Phase 0: Project Definition
 
 **Goal:** Define the project scope, MVP, architecture, and example configs.
@@ -151,59 +157,125 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Phase 4 does not run tests after applying patches.
 - Phase 4 does not commit changes to Git.
 
-## Phase 5: Test Execution and Debugging Loop
+## Phase 5: Test Execution System
 
-**Goal:** Run tests and let a debugging agent respond to failures.
+**Goal:** Safely run configured project test commands and save their results.
 
 **Status:** Planned.
 
 **Features:**
 
-- `run_tests` tool
-- Test output capture
-- Failure parsing
-- Debugger Agent
-- Max retry limit
-- Trace logging for each debug attempt
+- Configured project test commands
+- Safe command execution boundaries
+- Captured stdout
+- Captured stderr
+- Captured exit code
+- Captured duration
+- `test_results.json` artifact
+- `test_output.txt` artifact
 
-**Example future flow:**
+**Important constraints:**
 
-```text
-Apply approved patch
-  |
-  v
-Run tests
-  |
-  v
-If tests fail, Debugger Agent proposes a fix
-  |
-  v
-User approves or rejects
-  |
-  v
-Run tests again
-```
+- No debugger loop yet.
+- No automatic patch application.
+- No Git commits.
+- Test execution should be inspectable and reproducible from saved artifacts.
 
-## Future Phase: Agent-Decided Dynamic Tool Calling
+## Phase 6: Debugger Loop
 
-**Goal:** Allow an agent step to request tool calls dynamically during model interaction.
+**Goal:** Use failed test output as input for a debugger agent that proposes follow-up patches.
 
 **Status:** Planned.
 
-This is intentionally not part of Phase 2. Phase 2 uses deterministic runner-gathered context based on `allowed_tools`.
+**Features:**
 
-**Potential features:**
+- Debugger Agent
+- Failed test output passed into debugger context
+- Follow-up patch proposal artifacts
+- Trace logging for debugger attempts
+- Clear stop conditions and retry limits
+
+**Important constraints:**
+
+- Human still reviews and applies patches.
+- No automatic patch application.
+- No hidden file modification.
+
+## Phase 7: Real LLM Provider Layer
+
+**Goal:** Add real model providers without losing deterministic tests.
+
+**Status:** Planned.
+
+**Features:**
+
+- Provider abstraction
+- Mock provider retained for tests
+- OpenAI-compatible provider and/or Ollama/local provider
+- Environment-variable configuration
+- `.env.example`
+
+**Important constraints:**
+
+- Do not hardcode secrets.
+- Keep provider behavior observable in artifacts where useful.
+- Preserve reliable tests through the mock provider.
+
+## Phase 8: Dynamic Agent-Decided Tool Calling
+
+**Goal:** Allow agents to request tools during execution while preserving tool permissions and observability.
+
+**Status:** Planned.
+
+**Features:**
 
 - Tool call request schema
 - Tool call result messages
-- Tool permission enforcement
-- Tool call limits
-- Safer error handling for model-requested tools
-- Richer tool observability
+- `allowed_tools` enforcement
+- Tool input validation
+- Tool call recording
+- Maximum tool-iteration caps
+- Safe error handling for model-requested tools
 
-## Phase 6: Python SDK
+**Important constraints:**
 
-**Goal:** Make AgentForge usable as a Python library.
+- Keep project-root sandboxing.
+- Keep read/write boundaries explicit.
+- Do not let dynamic tool calling bypass configured permissions.
+
+## Phase 9: Custom Agents and Workflows
+
+**Goal:** Improve CLI support for creating, validating, discovering, and organizing agent and workflow configs.
+
+**Status:** Planned.
+
+**Features:**
+
+- CLI validation for agent and workflow configs
+- CLI listing for available agents and workflows
+- CLI creation commands for starter configs
+- Templates for new agents and workflows
+- Local config registry if appropriate
+
+## Phase 10: CLI Cleanup and UX Polish
+
+**Goal:** Make the command-line product complete, coherent, and pleasant to use before adding other surfaces.
+
+**Status:** Planned.
+
+**Features:**
+
+- Improved command structure
+- Better help text
+- Better errors
+- Latest-run shortcuts
+- Readable output tables
+- `--json` mode where appropriate
+- `--verbose` mode where appropriate
+
+## Phase 11: Python SDK
+
+**Goal:** Expose the stable engine through a Python API after the CLI product is complete.
 
 **Status:** Planned.
 
@@ -219,102 +291,27 @@ print(result.final_report)
 
 The SDK should expose the core workflow engine without requiring the CLI.
 
-## Phase 7: Local Dashboard
+## Phase 12: Dashboard
 
-**Goal:** Add a local dashboard for visual workflow execution.
+**Goal:** Add a visual interface after the CLI and SDK foundations are stable.
 
 **Status:** Planned.
 
 **Features:**
 
-- Run workflow from UI
-- Choose workflow
-- Enable or disable agents
+- Run workflows
 - Inspect shared state
 - Inspect trace logs
 - Inspect tool call logs
 - Review patches
-- View test output
+- Inspect test results
+- Inspect debugger loops
+- Manage agents and workflows
 - Compare runs
-
-The dashboard should come after the CLI and SDK are stable.
-
-## Phase 8: Dockerized Local Platform
-
-**Goal:** Let users run the full platform locally with Docker.
-
-**Status:** Planned.
-
-Example command:
-
-```bash
-docker compose up
-```
-
-Expected local interface:
-
-```text
-http://localhost:3000
-```
-
-This phase supports the long-term goal of a locally hosted tool where users bring their own API keys.
-
-## Phase 9: Custom Agent Creation
-
-**Goal:** Let users create and configure their own agents.
-
-**Status:** Planned.
-
-**Features:**
-
-- Agent templates
-- Prompt editor
-- Tool permission selection
-- Model selection
-- Input/output schema selection
-- Import/export agent configs
-- Save agents as YAML
-
-This phase moves AgentForge closer to a plug-and-play agent workflow platform.
-
-## Phase 10: Workflow Library
-
-**Goal:** Provide reusable development workflows.
-
-**Status:** Planned.
-
-**Possible workflows:**
-
-- Full-stack feature planning
-- Frontend component design
-- Backend endpoint design
-- Test generation
-- Bug investigation
-- Security review
-- Documentation generation
-- Deployment preparation
-- Database migration planning
-
-## Phase 11: Non-Technical Guided Mode
-
-**Goal:** Make AgentForge useful for less technical users.
-
-**Status:** Planned.
-
-**Features:**
-
-- Plain-English project intake
-- Workflow recommendation
-- Agent recommendation
-- Guided approval checkpoints
-- Simplified explanations of technical decisions
-- Safer defaults
-
-This phase supports the broader goal of making high-quality software workflows more accessible to non-technical users.
 
 ## Long-Term Vision
 
-AgentForge becomes a local-first platform for composing specialist software-development agents through CLI, SDK, and dashboard interfaces.
+AgentForge becomes a local-first platform for composing specialist software-development agents. The CLI is the primary product surface until the engine, safety model, and developer workflows are complete.
 
 Users should eventually be able to:
 
@@ -324,4 +321,5 @@ Users should eventually be able to:
 - Run workflows locally
 - Inspect every intermediate step
 - Approve or reject generated changes
-- Use the tool from terminal, Python code, or local dashboard
+- Run configured tests and inspect results
+- Use the tool from the terminal first, then from Python code or a local dashboard

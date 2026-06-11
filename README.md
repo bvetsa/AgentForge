@@ -10,6 +10,12 @@ Modern AI coding tools are powerful, but they are often monolithic and opaque. A
 
 The long-term goal is to make high-quality AI-assisted software development more modular, inspectable, and configurable.
 
+## Project Direction
+
+AgentForge is CLI-first. The command-line product and core engine should become complete, polished, useful, and safe before SDK or dashboard surfaces are added.
+
+The roadmap prioritizes local execution, inspectable artifacts, human-approved file modification, test execution, debugger loops, real provider support, dynamic tool calling, custom configs, and CLI UX cleanup before expanding to Python SDK and dashboard interfaces.
+
 ## Current Status
 
 **Phase 1:** Implemented the YAML-driven workflow runner.
@@ -22,7 +28,7 @@ The long-term goal is to make high-quality AI-assisted software development more
 
 The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, writes traceable run artifacts, and lets a human explicitly review and apply one selected patch proposal.
 
-AgentForge still does not automatically apply patches, execute tests as an agent tool, commit changes to Git, call real LLM APIs, or let agents dynamically decide which tools to call. File modification only happens through `agentforge patch apply` after the user selects a specific run ID, patch ID, and project root.
+AgentForge still does not automatically apply patches, execute configured project test commands, commit changes to Git, call real LLM APIs, or let agents dynamically decide which tools to call. File modification only happens through `agentforge patch apply` after the user selects a specific run ID, patch ID, and project root.
 
 ## Local Setup
 
@@ -247,15 +253,15 @@ Apply one approved patch proposal:
 agentforge patch apply <run_id> <patch_id> --project-root examples/sample_project
 ```
 
-## Long-Term Vision
+## Roadmap Direction
 
-AgentForge will eventually support three usage modes:
+AgentForge will eventually support three product surfaces, in this order:
 
 1. CLI interface
 2. Python SDK
-3. Local dashboard through Docker and localhost
+3. Local dashboard
 
-The long-term product vision is a local-first platform where users can compose configurable specialist agents into development workflows, plug in their own API keys, inspect each step, approve code changes, and extend the system with custom agents.
+The remaining roadmap keeps Phases 5-10 focused on completing the CLI and core engine: test execution, debugger loops, real LLM provider support, dynamic tool calling, custom agent/workflow management, and CLI UX polish. The Python SDK and dashboard come after the CLI product is stable.
 
 ## Documentation
 

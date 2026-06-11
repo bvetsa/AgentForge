@@ -12,6 +12,12 @@ Modern AI coding tools are powerful but often monolithic and opaque. AgentForge 
 
 Instead of one general assistant attempting to perform the entire development process, AgentForge separates the process into specialized roles such as planning, frontend design, backend design, testing, security review, debugging, documentation, and DevOps.
 
+## Product Direction
+
+AgentForge is a CLI-first project. The command-line developer tool and core engine should become stable, useful, polished, and safe before SDK or dashboard surfaces are added.
+
+The product should remain local-first, artifact-driven, and explicit about file modification. Agents and workflows should stay composable, and users should be able to inspect outputs, traces, tool calls, patches, and future test results before approving further action.
+
 ## Current Scope
 
 Phase 1 implemented the YAML-driven workflow runner.
@@ -22,7 +28,7 @@ Phase 3 implemented patch proposal artifacts. Patch-producing agents can now emi
 
 Phase 4 implemented human-approved patch review and application commands. A user can list proposals for a run, inspect one diff, and explicitly apply one selected patch to a provided project root.
 
-The current scope is still intentionally limited. AgentForge does not automatically apply patches, execute tests as an agent tool, commit changes to Git, integrate real LLM APIs, provide a dashboard, or let agents dynamically decide which tools to call. File modification only happens after an explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command.
+The current scope is still intentionally limited. AgentForge does not automatically apply patches, execute configured project test commands, commit changes to Git, integrate real LLM APIs, provide a dashboard, or let agents dynamically decide which tools to call. File modification only happens after an explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command.
 
 ## User Story
 
@@ -118,14 +124,30 @@ AgentForge currently does not include:
 - Automatic patch application
 - Filesystem modification by agents
 - Git integration
-- Test execution as an agent tool
+- Configured project test execution
+- Debugger loop
 - User accounts
 - Agent marketplace
 - Autonomous app generation
 - Custom agent creation UI
 - Dynamic agent-decided tool calling
 
-These exclusions are intentional. The early phases build a reliable, understandable, and safe engine before adding more powerful surfaces.
+These exclusions are intentional. The completed phases build a reliable, understandable, and safe CLI foundation before adding more powerful behavior or additional surfaces.
+
+## Planned Direction
+
+Planned work should proceed in this order:
+
+1. Phase 5: Test Execution System
+2. Phase 6: Debugger Loop
+3. Phase 7: Real LLM Provider Layer
+4. Phase 8: Dynamic Agent-Decided Tool Calling
+5. Phase 9: Custom Agents and Workflows
+6. Phase 10: CLI Cleanup and UX Polish
+7. Phase 11: Python SDK
+8. Phase 12: Dashboard
+
+Phases 5-10 complete the CLI and core engine first. The SDK and dashboard should come after the CLI product is stable.
 
 ## Core Objects
 
@@ -409,7 +431,7 @@ Run artifacts make AgentForge inspectable and reproducible.
 
 ## Design Principles
 
-1. Build the engine before the dashboard.
+1. Build the CLI and engine before the SDK or dashboard.
 2. Prefer explicit workflows over hidden autonomous behavior.
 3. Make every agent output inspectable.
 4. Use structured state instead of unstructured message passing.
@@ -427,7 +449,6 @@ AgentForge should eventually support:
 - CLI execution
 - Python SDK usage
 - Local dashboard
-- Dockerized local deployment
 - Configurable agents
 - Custom workflows
 - Tool permissions
@@ -435,9 +456,8 @@ AgentForge should eventually support:
 - Human-approved file changes
 - Test execution
 - Debugging loops
-- Git integration
 - Trace visualization
 - User-provided API keys
 - Model-provider flexibility
 
-The long-term goal is to help technical and semi-technical users build better software by composing specialized AI agents into inspectable development workflows.
+The long-term goal is to help developers build better software by composing specialized AI agents into inspectable local workflows. The CLI is the primary product surface until the engine, safety model, and developer workflows are complete.

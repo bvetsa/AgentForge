@@ -378,41 +378,51 @@ Run artifacts make AgentForge inspectable and reproducible. They are generated o
 
 ## Future Architecture
 
-The long-term architecture expands the current engine into a fuller local platform.
+The next architecture work stays CLI-first. Phases 5-10 should complete the command-line product and core engine before the Python SDK and dashboard call into the same stable internals.
 
 ```text
-CLI / SDK / Dashboard
-        |
-        v
-Workflow Engine
-        |
-        v
-Agent Registry
-        |
-        v
-Tool Registry
-        |
-        v
-LLM Provider Layer
-        |
-        v
-Patch / Test / Git Tools
-        |
-        v
-Trace Store
+CLI
+ |
+ v
+Core Engine
+ |
+ +--> Agent and Workflow Configs
+ |
+ +--> Tool Registry
+ |
+ +--> Patch Review Service
+ |
+ +--> Test Execution System
+ |
+ +--> Debugger Loop
+ |
+ +--> LLM Provider Layer
+ |
+ v
+Run Artifacts
+
+Later surfaces:
+
+Python SDK -> Core Engine
+Dashboard  -> Core Engine
 ```
 
 ## Future Components
 
-### Agent Registry
+### Test Execution System
 
-Stores available agents and allows users to enable, disable, or create agents.
+Runs configured project test commands from the CLI and captures stdout, stderr, exit code, and duration.
 
-### Dynamic Tool Calling
+Planned artifacts:
 
-Allows model outputs to request tool calls during an agent step.
+- `test_results.json`
+- `test_output.txt`
 
-This is not part of Phase 2. Phase 2 only gathers deterministic context from `allowed_tools`.
+Phase 5 should not include a debugger loop or automatic patch application.
+
+### Debugger Loop
+
+Uses failed test output as context for a debugger agent. The debugger may propose follow-up patch artifacts, but humans still review and apply patches explicitly.
 
 ### LLM Provider Layer
 
@@ -420,13 +430,25 @@ Abstracts model providers.
 
 Possible providers:
 
-- OpenAI
-- Anthropic
-- Google
+- OpenAI-compatible APIs
 - Local Ollama
-- Other OpenAI-compatible APIs
+- Other local providers
 
-The provider layer should allow users to bring their own API keys.
+The provider layer should allow users to bring their own API keys through environment variables. Secrets should not be hardcoded. The mock provider should remain available for deterministic tests.
+
+### Dynamic Tool Calling
+
+Allows model outputs to request tool calls during an agent step.
+
+Dynamic tool calling must enforce `allowed_tools`, validate tool inputs, record tool calls, cap tool iterations, and preserve project-root sandbox boundaries.
+
+### Agent and Workflow Config Management
+
+Adds CLI support for validating, listing, and creating agent and workflow configs. Templates and a local config registry can be added if they make common workflows easier to manage.
+
+### CLI UX Layer
+
+Improves command structure, help text, error messages, latest-run shortcuts, readable output tables, and optional `--json` or `--verbose` modes.
 
 ### Patch System
 
@@ -434,32 +456,34 @@ Allows agents to propose file changes as patches instead of directly modifying f
 
 Design rule: the system requires human approval before applying patches. The current CLI supports explicit single-patch application; future phases may add richer review metadata, rollback, and reporting.
 
-### Test Runner
+### Python SDK
 
-Runs project tests and captures output.
-
-Future debugging workflows can use test output as input for a Debugger Agent.
+Exposes the stable core engine through a Python API after the CLI product is complete.
 
 ### Dashboard
 
-Provides a local visual interface for:
+Provides a local visual interface after the CLI and SDK foundations are stable.
 
-- Choosing workflows
-- Enabling or disabling agents
+Expected views include:
+
+- Running workflows
 - Viewing traces
 - Viewing tool call logs
 - Reviewing patches
 - Inspecting test output
+- Inspecting debugger loops
+- Managing agents and workflows
 - Comparing runs
 
 ## Design Principles
 
-- Engine before dashboard
-- CLI before UI
+- CLI product before SDK or dashboard
+- Local-first execution
 - Mock before real LLM
 - Sequential before graph-based
 - Inspectable before autonomous
 - Safe before automatic
+- Artifacts before hidden state
 - Explicit workflows before hidden behavior
 - Shared state before unstructured message passing
 - Human approval before file modification
