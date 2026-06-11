@@ -4,7 +4,7 @@
 
 AgentForge is a CLI-first, local-first developer tool for composable agent workflows. The CLI and core engine should become stable, useful, inspectable, and safe before AgentForge adds SDK or dashboard surfaces.
 
-Completed phases establish workflow execution, read-only project inspection, patch proposal artifacts, and explicit human-approved patch application. Planned phases should keep file modification safety, artifact visibility, and command-line ergonomics as the primary product constraints.
+Completed phases establish workflow execution, read-only project inspection, patch proposal artifacts, explicit human-approved patch application, and safe test execution. Planned phases should keep file modification safety, artifact visibility, and command-line ergonomics as the primary product constraints.
 
 ## Phase 0: Project Definition
 
@@ -161,18 +161,46 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 
 **Goal:** Safely run configured project test commands and save their results.
 
-**Status:** Planned.
+**Status:** Implemented.
 
-**Features:**
+**Implemented features:**
 
-- Configured project test commands
+- Deterministic project scanner for file tree, language extensions, package files, test files, docs, CI workflows, Makefile targets, package scripts, and Python/Django indicators
+- Evidence-based test command detector with ranked candidates
+- `agentforge test detect --project-root <path>`
+- `agentforge test run --project-root <path>`
+- Timeout override with `agentforge test run --project-root <path> --timeout 30`
+- Explicit override with `agentforge test run --project-root <path> --command "pytest"`
+- Explicit command plus timeout with `agentforge test run --project-root <path> --command "pytest" --timeout 30`
 - Safe command execution boundaries
 - Captured stdout
 - Captured stderr
 - Captured exit code
 - Captured duration
+- Default 30-second timeout and `timeout_seconds` recording
+- Timeout status recorded as `status: "timeout"` with `timed_out: true`
 - `test_results.json` artifact
 - `test_output.txt` artifact
+
+**Detection priority:**
+
+1. Explicit `--command`
+2. CI workflow test commands
+3. README or CONTRIBUTING documented test commands
+4. Task runner targets such as `make test`
+5. Package manager scripts such as `npm test`
+6. Framework-specific commands
+7. Language default commands
+8. No detection
+
+**Initial safe command forms:**
+
+- `pytest`
+- `python -m pytest`
+- `python manage.py test`
+- `npm test`
+- `npm run test`
+- `make test`
 
 **Important constraints:**
 
@@ -180,6 +208,11 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - No automatic patch application.
 - No Git commits.
 - Test execution should be inspectable and reproducible from saved artifacts.
+- Detected and user-provided commands pass through the same safety validator.
+- Commands are run with `shell=False`.
+- Dangerous shell operators are rejected.
+- The selected working directory must resolve inside `project_root`.
+- Long-running commands are stopped at the configured timeout and still write artifacts.
 
 ## Phase 6: Debugger Loop
 

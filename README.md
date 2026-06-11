@@ -26,9 +26,11 @@ The roadmap prioritizes local execution, inspectable artifacts, human-approved f
 
 **Phase 4:** Implemented human-approved patch review and application commands.
 
-The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, writes traceable run artifacts, and lets a human explicitly review and apply one selected patch proposal.
+**Phase 5:** Implemented deterministic, evidence-based test command detection and safe test execution.
 
-AgentForge still does not automatically apply patches, execute configured project test commands, commit changes to Git, call real LLM APIs, or let agents dynamically decide which tools to call. File modification only happens through `agentforge patch apply` after the user selects a specific run ID, patch ID, and project root.
+The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, writes traceable run artifacts, lets a human explicitly review and apply one selected patch proposal, and can run a safe explicit or auto-detected project test command.
+
+AgentForge still does not automatically apply patches, start a debugger loop, commit changes to Git, call real LLM APIs, or let agents dynamically decide which tools to call. File modification only happens through `agentforge patch apply` after the user selects a specific run ID, patch ID, and project root.
 
 ## Local Setup
 
@@ -45,6 +47,8 @@ python -m pip install -e ".[dev]"
 GitHub Actions runs CI on pull requests and pushes to `main`. The workflow installs AgentForge with development dependencies, then runs `pytest`, `ruff check .`, and a CLI smoke test against `examples/workflows/basic_feature.yaml`.
 
 CI also runs a Phase 4 patch workflow smoke test against `examples/sample_project`. That smoke test runs a workflow, lists generated patches, shows one patch, explicitly applies one selected patch with `--project-root`, and verifies that at least one file under `examples/sample_project` changed.
+
+CI also runs a Phase 5 test execution smoke test against `examples/sample_project`. Because that sample project intentionally has incomplete app dependencies, CI verifies detection and artifact recording with an explicit safe pytest metadata command instead of requiring the sample project's tests to pass.
 
 ## CLI Usage
 
@@ -96,6 +100,44 @@ Patch application safety rules:
 - Patch context and deletion lines must match the current target file before AgentForge writes changes.
 
 Phase 4 does not run tests after applying a patch and does not commit changes to Git.
+
+## Test Detection and Execution
+
+Phase 5 adds deterministic test command detection and execution:
+
+```bash
+agentforge test detect --project-root .
+agentforge test run --project-root .
+agentforge test run --project-root . --timeout 30
+agentforge test run --project-root . --command "pytest"
+agentforge test run --project-root . --command "pytest" --timeout 30
+```
+
+When `--command` is omitted, AgentForge scans project evidence and ranks likely test commands. Evidence currently includes the file tree, detected language extensions, package and build files, test files and directories, README and CONTRIBUTING command snippets, GitHub Actions workflow run commands, Makefile `test` targets, `package.json` test scripts, and Python/Django indicators.
+
+Detection priority is:
+
+1. Explicit `--command`
+2. CI workflow test commands
+3. README or CONTRIBUTING documented test commands
+4. Task runner targets such as `make test`
+5. Package manager scripts such as `npm test`
+6. Framework-specific commands such as `python manage.py test`
+7. Language defaults such as `python -m pytest`
+
+Commands are executed with `shell=False`. Both explicit and detected commands pass through the same safety validator. Initial allowed command forms include `pytest`, `python -m pytest`, `python manage.py test`, `npm test`, `npm run test`, and `make test`. Dangerous shell operators are rejected, and a selected working directory must resolve inside `project_root`.
+
+Test commands default to a 30-second timeout. Use `--timeout <seconds>` to override it. If the command exceeds the timeout, AgentForge stops the process, records `status: "timeout"` and `timed_out: true`, and still writes test artifacts.
+
+Each test run writes:
+
+```text
+.agentforge/test-runs/<run_id>/
+  test_results.json
+  test_output.txt
+```
+
+`test_results.json` records the selected command, command source, detection reason, all candidates, working directory, status, exit code, duration, timeout state, `timeout_seconds`, and timestamp. If no safe command is detected, AgentForge fails clearly and asks the user to pass `--command`.
 
 ## Read-Only Project Inspection Tools
 
@@ -253,6 +295,16 @@ Apply one approved patch proposal:
 agentforge patch apply <run_id> <patch_id> --project-root examples/sample_project
 ```
 
+Detect and run project tests:
+
+```bash
+agentforge test detect --project-root .
+agentforge test run --project-root .
+agentforge test run --project-root . --timeout 30
+agentforge test run --project-root . --command "pytest"
+agentforge test run --project-root . --command "pytest" --timeout 30
+```
+
 ## Roadmap Direction
 
 AgentForge will eventually support three product surfaces, in this order:
@@ -261,7 +313,7 @@ AgentForge will eventually support three product surfaces, in this order:
 2. Python SDK
 3. Local dashboard
 
-The remaining roadmap keeps Phases 5-10 focused on completing the CLI and core engine: test execution, debugger loops, real LLM provider support, dynamic tool calling, custom agent/workflow management, and CLI UX polish. The Python SDK and dashboard come after the CLI product is stable.
+The remaining roadmap keeps Phases 6-10 focused on completing the CLI and core engine: debugger loops, real LLM provider support, dynamic tool calling, custom agent/workflow management, and CLI UX polish. The Python SDK and dashboard come after the CLI product is stable.
 
 ## Documentation
 

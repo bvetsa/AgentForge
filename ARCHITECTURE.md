@@ -2,7 +2,7 @@
 
 ## Current Architecture
 
-AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection, patch proposal artifacts, and human-approved patch application.
+AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection, patch proposal artifacts, human-approved patch application, and safe project test command execution.
 
 ```text
 CLI
@@ -39,9 +39,20 @@ Patch Review CLI
  |
  v
 Selected Project File
+
+Test CLI
+ |
+ v
+ProjectScanner -> ProjectEvidence -> TestCommandDetector -> TestCommandCandidate[]
+ |
+ v
+CommandSafetyValidator
+ |
+ v
+TestRunner -> Test Artifacts
 ```
 
-Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal.
+Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution.
 
 AgentForge still does not automatically apply patches, call real LLM APIs, run tests as an agent tool, commit changes to Git, or let agents dynamically choose tools. Source modification requires a human to invoke `agentforge patch apply` with a run ID, patch ID, and project root.
 
@@ -82,6 +93,26 @@ Detailed flow:
 
 Phase 4 does not run tests, start a debugging loop, or commit changes to Git.
 
+## Phase 5 Test Flow
+
+```text
+CLI -> ProjectScanner -> ProjectEvidence -> TestCommandDetector -> TestCommandCandidate[]
+    -> CommandSafetyValidator -> TestRunner -> Test Artifacts
+```
+
+Detailed flow:
+
+1. The user runs `agentforge test detect --project-root <path>` or `agentforge test run --project-root <path>`.
+2. If `--command` is provided to `test run`, it becomes the highest-priority candidate.
+3. Otherwise, `ProjectScanner` gathers deterministic evidence from the project tree, docs, GitHub Actions workflows, Makefiles, package scripts, test files, and Python/Django indicators.
+4. `TestCommandDetector` turns that evidence into ranked `TestCommandCandidate` values.
+5. `CommandSafetyValidator` rejects dangerous shell syntax, unsupported command forms, and working directories outside `project_root`.
+6. `TestRunner` executes the selected command with `shell=False` and a default 30-second timeout unless `--timeout` overrides it.
+7. If the command exceeds the timeout, AgentForge records `status: "timeout"`, `timed_out: true`, `timeout_seconds`, and any available stdout or stderr.
+8. `test_results.json` and `test_output.txt` are written under `.agentforge/test-runs/<run_id>/`.
+
+Phase 5 is deterministic. It does not use an LLM, start a debugger loop, apply patches, or commit changes.
+
 ## Components
 
 ### CLI
@@ -102,6 +133,16 @@ agentforge patch show <run_id> <patch_id>
 agentforge patch apply <run_id> <patch_id> --project-root <path>
 ```
 
+Test commands:
+
+```bash
+agentforge test detect --project-root <path>
+agentforge test run --project-root <path>
+agentforge test run --project-root <path> --timeout 30
+agentforge test run --project-root <path> --command "pytest"
+agentforge test run --project-root <path> --command "pytest" --timeout 30
+```
+
 Project context options:
 
 ```bash
@@ -119,8 +160,9 @@ Responsibilities:
 - List patch proposal metadata for a previous run
 - Print one selected patch diff
 - Apply one selected patch only after explicit user invocation
+- Detect and safely run likely project test commands
 
-The CLI stays thin. Most logic lives in the core engine.
+The CLI stays thin. Most logic lives in the core engine and the dedicated test execution package.
 
 ### Config Loader
 
@@ -378,7 +420,7 @@ Run artifacts make AgentForge inspectable and reproducible. They are generated o
 
 ## Future Architecture
 
-The next architecture work stays CLI-first. Phases 5-10 should complete the command-line product and core engine before the Python SDK and dashboard call into the same stable internals.
+The next architecture work stays CLI-first. Phases 6-10 should complete the command-line product and core engine before the Python SDK and dashboard call into the same stable internals.
 
 ```text
 CLI
@@ -392,7 +434,6 @@ Core Engine
  |
  +--> Patch Review Service
  |
- +--> Test Execution System
  |
  +--> Debugger Loop
  |
@@ -407,18 +448,25 @@ Python SDK -> Core Engine
 Dashboard  -> Core Engine
 ```
 
-## Future Components
+## Current and Future Components
 
 ### Test Execution System
 
-Runs configured project test commands from the CLI and captures stdout, stderr, exit code, and duration.
+Runs explicit or auto-detected project test commands from the CLI and captures stdout, stderr, exit code, duration, timeout status, and `timeout_seconds`. The default timeout is 30 seconds.
 
-Planned artifacts:
+Artifacts:
 
 - `test_results.json`
 - `test_output.txt`
 
-Phase 5 should not include a debugger loop or automatic patch application.
+The implemented pipeline is:
+
+```text
+ProjectScanner -> ProjectEvidence -> TestCommandDetector -> TestCommandCandidate[]
+    -> CommandSafetyValidator -> TestRunner
+```
+
+Phase 5 does not include a debugger loop or automatic patch application.
 
 ### Debugger Loop
 

@@ -28,7 +28,9 @@ Phase 3 implemented patch proposal artifacts. Patch-producing agents can now emi
 
 Phase 4 implemented human-approved patch review and application commands. A user can list proposals for a run, inspect one diff, and explicitly apply one selected patch to a provided project root.
 
-The current scope is still intentionally limited. AgentForge does not automatically apply patches, execute configured project test commands, commit changes to Git, integrate real LLM APIs, provide a dashboard, or let agents dynamically decide which tools to call. File modification only happens after an explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command.
+Phase 5 implemented deterministic project test command detection and safe execution. A user can run `agentforge test run --project-root <path>` without specifying a language, framework, or test command, or provide an explicit override with `--command`.
+
+The current scope is still intentionally limited. AgentForge does not automatically apply patches, start debugger loops, commit changes to Git, integrate real LLM APIs, provide a dashboard, or let agents dynamically decide which tools to call. File modification only happens after an explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command.
 
 ## User Story
 
@@ -71,6 +73,16 @@ agentforge patch show <run_id> <patch_id>
 agentforge patch apply <run_id> <patch_id> --project-root examples/sample_project
 ```
 
+I can also detect or run project tests:
+
+```bash
+agentforge test detect --project-root .
+agentforge test run --project-root .
+agentforge test run --project-root . --timeout 30
+agentforge test run --project-root . --command "pytest"
+agentforge test run --project-root . --command "pytest" --timeout 30
+```
+
 ## Workflow
 
 The initial workflow is:
@@ -109,6 +121,8 @@ Each agent reads specific keys from shared state and writes one new output key b
 - Tool call logging
 - Patch proposal artifacts
 - Human-approved patch review and application commands
+- Evidence-based project test command detection
+- Safe project test execution
 - Saved run artifacts
 - Basic tests
 
@@ -124,7 +138,6 @@ AgentForge currently does not include:
 - Automatic patch application
 - Filesystem modification by agents
 - Git integration
-- Configured project test execution
 - Debugger loop
 - User accounts
 - Agent marketplace
@@ -138,16 +151,15 @@ These exclusions are intentional. The completed phases build a reliable, underst
 
 Planned work should proceed in this order:
 
-1. Phase 5: Test Execution System
-2. Phase 6: Debugger Loop
-3. Phase 7: Real LLM Provider Layer
-4. Phase 8: Dynamic Agent-Decided Tool Calling
-5. Phase 9: Custom Agents and Workflows
-6. Phase 10: CLI Cleanup and UX Polish
-7. Phase 11: Python SDK
-8. Phase 12: Dashboard
+1. Phase 6: Debugger Loop
+2. Phase 7: Real LLM Provider Layer
+3. Phase 8: Dynamic Agent-Decided Tool Calling
+4. Phase 9: Custom Agents and Workflows
+5. Phase 10: CLI Cleanup and UX Polish
+6. Phase 11: Python SDK
+7. Phase 12: Dashboard
 
-Phases 5-10 complete the CLI and core engine first. The SDK and dashboard should come after the CLI product is stable.
+Phases 6-10 complete the CLI and core engine first. The SDK and dashboard should come after the CLI product is stable.
 
 ## Core Objects
 
