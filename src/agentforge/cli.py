@@ -8,10 +8,13 @@ import typer
 from agentforge.config.loader import ConfigLoadError
 from agentforge.core.runner import WorkflowExecutionError, WorkflowRunner
 from agentforge.patches import PatchReviewError, PatchReviewService
+from agentforge.testing import DEFAULT_TEST_TIMEOUT_SECONDS, TestRunError, TestRunner
 
 app = typer.Typer(help="Run composable software-development agent workflows.")
 patch_app = typer.Typer(help="Review and apply patch proposals from a previous run.")
+test_app = typer.Typer(help="Detect and run project test commands.")
 app.add_typer(patch_app, name="patch")
+app.add_typer(test_app, name="test")
 
 
 @app.callback()
@@ -142,6 +145,103 @@ def apply_patch(
         _exit_with_error(error)
 
     typer.echo(f"Applied patch '{patch_id}' to {target_path}")
+
+
+@test_app.command("detect")
+def detect_test_command(
+    project_root: Annotated[
+        Path,
+        typer.Option(
+            "--project-root",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Project root to inspect for likely test commands.",
+        ),
+    ],
+) -> None:
+    """Show likely test commands without running them."""
+    try:
+        assessments = TestRunner().detect_candidates(project_root)
+    except TestRunError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+    if not assessments:
+        typer.echo("No test command candidates detected.")
+        return
+
+    typer.echo("Safety\tConfidence\tSource\tWorking directory\tCommand\tReason")
+    for assessment in assessments:
+        candidate = assessment.candidate
+        safety = "safe" if assessment.safety.is_safe else "unsafe"
+        command_text = " ".join(candidate.command)
+        reason = candidate.reason
+        if assessment.safety.reason:
+            reason = f"{reason} ({assessment.safety.reason})"
+        typer.echo(
+            "\t".join(
+                [
+                    safety,
+                    f"{candidate.confidence:.2f}",
+                    candidate.source_type,
+                    str(candidate.working_directory.resolve(strict=False)),
+                    command_text,
+                    reason,
+                ]
+            )
+        )
+
+
+@test_app.command("run")
+def run_test_command(
+    project_root: Annotated[
+        Path,
+        typer.Option(
+            "--project-root",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Project root where tests should be detected and run.",
+        ),
+    ],
+    command: Annotated[
+        str | None,
+        typer.Option(
+            "--command",
+            help="Explicit test command to run instead of auto-detection.",
+        ),
+    ] = None,
+    timeout_seconds: Annotated[
+        int,
+        typer.Option("--timeout", help="Maximum test command runtime in seconds."),
+    ] = DEFAULT_TEST_TIMEOUT_SECONDS,
+) -> None:
+    """Run an explicit or auto-detected safe test command."""
+    try:
+        result = TestRunner().run(
+            project_root=project_root,
+            command=command,
+            timeout_seconds=timeout_seconds,
+        )
+    except TestRunError as error:
+        typer.echo(f"Error: {error}", err=True)
+        if error.run_directory is not None:
+            typer.echo(f"Test artifacts: {error.run_directory}", err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Test command: {' '.join(result.selected_command)}")
+    typer.echo(f"Command source: {result.command_source}")
+    typer.echo(f"Status: {result.status}")
+    typer.echo(f"Exit code: {result.exit_code}")
+    typer.echo(f"Test artifacts: {result.run_directory}")
+
+    if result.exit_code not in (None, 0):
+        raise typer.Exit(code=result.exit_code)
+    if result.timed_out or result.status == "error":
+        raise typer.Exit(code=1)
 
 
 def _exit_with_error(error: PatchReviewError) -> None:
