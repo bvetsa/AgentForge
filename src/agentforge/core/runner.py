@@ -62,6 +62,7 @@ class WorkflowRunner:
         input_text: str,
         project_root: str | Path | None = None,
         use_project_context: bool = True,
+        stop_before_agent_names: set[str] | None = None,
     ) -> RunResult:
         """Run a workflow and persist its artifacts."""
         workflow = Workflow.from_file(workflow_path)
@@ -72,8 +73,11 @@ class WorkflowRunner:
         tool_call_log = ToolCallLog()
         agent_outputs: list[tuple[str, str]] = []
         patch_proposals: list[PatchProposal] = []
+        stop_names = stop_before_agent_names or set()
 
         for agent in workflow.agents:
+            if agent.config.name in stop_names:
+                break
             try:
                 inputs = agent.collect_inputs(state)
                 if tool_registry is not None:

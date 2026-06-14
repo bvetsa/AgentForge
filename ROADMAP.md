@@ -214,7 +214,52 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - The selected working directory must resolve inside `project_root`.
 - Long-running commands are stopped at the configured timeout and still write artifacts.
 
-## Phase 6: Debugger Loop
+## Phase 6: End-to-End Dev Pipeline
+
+**Goal:** Provide one command that orchestrates request handling, workflow execution, patch proposals, human approval, patch application, safe test execution, planner decision, and final verdict.
+
+**Status:** Implemented.
+
+**Implemented features:**
+
+- `agentforge dev run --input "<request>"`
+- Optional `--project-root <path>` defaulting to the current working directory
+- Optional `--workflow <path>` defaulting to `examples/workflows/basic_feature.yaml`
+- `--yes` to apply all proposed patches without prompting
+- `--max-cycles <int>` defaulting to `1`
+- One run directory for the whole dev run
+- Workflow execution through the existing workflow runner, stopped before reviewer
+- Existing Phase 3 patch proposal generation
+- Approval stop point showing generated patch IDs and target files
+- Default approval of no
+- No patch application or test execution when approval is declined
+- Application of all proposed patches after approval through the Phase 4 patch review service
+- Safe test execution after approval through the Phase 5 test runner
+- `test_results.json` and `test_output.txt` written into the same dev run directory
+- Planner decision recorded after tests
+- Final user-facing verdict printed only after the planner decision
+- `dev_run_summary.json` artifact
+
+**Agent categories:**
+
+- Customer-facing agents: `planner`, `reviewer`
+- Coding agents: `frontend`, `backend`
+- Post-coding agents: `testing`
+
+**Important constraints:**
+
+- Reviewer is not called before approval.
+- Reviewer/final verdict is not used for the pre-approval change summary.
+- Testing results go back to the planner stage conceptually, not directly to reviewer.
+- Planner controls whether the pipeline returns a final verdict or reports that another cycle is needed.
+- True debugger/failure-repair loop is deferred to Phase 7.
+- Dynamic workflow creation is not implemented.
+- Dynamic agent selection is not implemented.
+- Real LLM planning is not implemented.
+- No Git commits.
+- No SDK, dashboard, or Docker.
+
+## Phase 7: Debugger Loop
 
 **Goal:** Use failed test output as input for a debugger agent that proposes follow-up patches.
 
@@ -231,10 +276,10 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 **Important constraints:**
 
 - Human still reviews and applies patches.
-- No automatic patch application.
 - No hidden file modification.
+- No Git commits.
 
-## Phase 7: Real LLM Provider Layer
+## Phase 8: Real LLM Provider Layer
 
 **Goal:** Add real model providers without losing deterministic tests.
 
@@ -254,7 +299,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Keep provider behavior observable in artifacts where useful.
 - Preserve reliable tests through the mock provider.
 
-## Phase 8: Dynamic Agent-Decided Tool Calling
+## Phase 9: Dynamic Agent-Decided Tool Calling
 
 **Goal:** Allow agents to request tools during execution while preserving tool permissions and observability.
 
@@ -276,7 +321,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Keep read/write boundaries explicit.
 - Do not let dynamic tool calling bypass configured permissions.
 
-## Phase 9: Custom Agents and Workflows
+## Phase 10: Custom Agents and Workflows
 
 **Goal:** Improve CLI support for creating, validating, discovering, and organizing agent and workflow configs.
 
@@ -290,7 +335,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Templates for new agents and workflows
 - Local config registry if appropriate
 
-## Phase 10: CLI Cleanup and UX Polish
+## Phase 11: CLI Cleanup and UX Polish
 
 **Goal:** Make the command-line product complete, coherent, and pleasant to use before adding other surfaces.
 
@@ -306,7 +351,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - `--json` mode where appropriate
 - `--verbose` mode where appropriate
 
-## Phase 11: Python SDK
+## Phase 12: Python SDK
 
 **Goal:** Expose the stable engine through a Python API after the CLI product is complete.
 
@@ -324,7 +369,7 @@ print(result.final_report)
 
 The SDK should expose the core workflow engine without requiring the CLI.
 
-## Phase 12: Dashboard
+## Phase 13: Dashboard
 
 **Goal:** Add a visual interface after the CLI and SDK foundations are stable.
 

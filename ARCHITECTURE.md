@@ -2,7 +2,7 @@
 
 ## Current Architecture
 
-AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection, patch proposal artifacts, human-approved patch application, and safe project test command execution.
+AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection, patch proposal artifacts, human-approved patch application, safe project test command execution, and a Phase 6 end-to-end dev pipeline.
 
 ```text
 CLI
@@ -50,11 +50,24 @@ CommandSafetyValidator
  |
  v
 TestRunner -> Test Artifacts
+
+Dev CLI
+ |
+ v
+DevPipelineRunner
+ |
+ +--> Workflow Runner, stopped before reviewer
+ +--> Approval Gate
+ +--> Patch Review Service
+ +--> TestRunner
+ +--> Planner Decision
+ v
+Final Verdict + Dev Run Summary
 ```
 
-Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution.
+Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution. Phase 6 added `agentforge dev run`, a human-approved end-to-end pipeline from request to patch proposals to approval to patch application to safe test execution to final verdict.
 
-AgentForge still does not automatically apply patches, call real LLM APIs, run tests as an agent tool, commit changes to Git, or let agents dynamically choose tools. Source modification requires a human to invoke `agentforge patch apply` with a run ID, patch ID, and project root.
+AgentForge still does not implement a debugger/failure-repair loop, call real LLM APIs, dynamically create workflows, commit changes to Git, or let agents dynamically choose tools. Source modification requires human approval through `agentforge patch apply` or the Phase 6 dev pipeline approval gate.
 
 ## Phase 2 Tool Flow
 
@@ -113,6 +126,41 @@ Detailed flow:
 
 Phase 5 is deterministic. It does not use an LLM, start a debugger loop, apply patches, or commit changes.
 
+## Phase 6 Dev Pipeline Flow
+
+```text
+CLI -> DevPipelineRunner -> WorkflowRunner(stop before reviewer)
+    -> Patch Proposals -> Approval Gate
+    -> PatchReviewService -> TestRunner
+    -> Planner Decision -> Final Verdict -> Dev Run Artifacts
+```
+
+Detailed flow:
+
+1. The user runs `agentforge dev run --input "<request>"`.
+2. `--project-root` is optional and defaults to the current working directory.
+3. `--workflow` is optional and defaults to `examples/workflows/basic_feature.yaml`.
+4. The dev pipeline creates one run directory for the whole dev run.
+5. The workflow runner executes the selected workflow up to, but not including, `reviewer`.
+6. Patch-producing agents generate normal Phase 3 patch proposal artifacts.
+7. The CLI prints the request, resolved project root, workflow path, cycle number, planner summary, selected workflow agents, and generated patch IDs and target files.
+8. The human approval gate asks `Apply all proposed patches? [y/N]:`.
+9. Default approval is no. If the user presses Enter or answers no, no patches are applied and tests are not run.
+10. If the user answers yes or passes `--yes`, all proposals with status `proposed` are applied through the Phase 4 patch review service.
+11. Tests run through the Phase 5 `TestRunner`, and `test_results.json` plus `test_output.txt` are written into the same dev run directory.
+12. Test status goes back to the planner stage conceptually. The planner records whether to send to reviewer/final verdict, report that Phase 7 repair is needed, or include a max-cycle note.
+13. Reviewer/final verdict is printed only after the planner decision.
+
+The planner is the controller/orchestrator in Phase 6. Reviewer is not called before approval and is not used for the pre-approval change summary.
+
+Agent categories:
+
+- Customer-facing agents: `planner`, `reviewer`
+- Coding agents: `frontend`, `backend`
+- Post-coding agents: `testing`
+
+Phase 6 intentionally does not implement automatic repair, dynamic workflow creation, real LLM planning, dynamic agent-decided tool calling, Git commits, SDK, dashboard, or Docker.
+
 ## Components
 
 ### CLI
@@ -143,6 +191,15 @@ agentforge test run --project-root <path> --command "pytest"
 agentforge test run --project-root <path> --command "pytest" --timeout 30
 ```
 
+Dev pipeline command:
+
+```bash
+agentforge dev run --input "<request>"
+agentforge dev run --project-root <path> --input "<request>"
+agentforge dev run --project-root <path> --input "<request>" --yes
+agentforge dev run --workflow <path> --project-root <path> --input "<request>"
+```
+
 Project context options:
 
 ```bash
@@ -161,6 +218,7 @@ Responsibilities:
 - Print one selected patch diff
 - Apply one selected patch only after explicit user invocation
 - Detect and safely run likely project test commands
+- Run the Phase 6 dev pipeline with an approval gate and final verdict
 
 The CLI stays thin. Most logic lives in the core engine and the dedicated test execution package.
 
@@ -401,6 +459,14 @@ patch_manifest.json
 final_report.md
 ```
 
+Phase 6 dev runs also write:
+
+```text
+dev_run_summary.json
+test_results.json, if tests were run
+test_output.txt, if tests were run
+```
+
 Patch proposal files are written under:
 
 ```text
@@ -415,12 +481,13 @@ Responsibilities:
 - Save tool call records
 - Save patch proposal manifests and diff files
 - Generate a human-readable report
+- Record the dev run status, cycles, generated patches, applied patches, test status, planner decisions, and final verdict
 
 Run artifacts make AgentForge inspectable and reproducible. They are generated output and should not be committed.
 
 ## Future Architecture
 
-The next architecture work stays CLI-first. Phases 6-10 should complete the command-line product and core engine before the Python SDK and dashboard call into the same stable internals.
+The next architecture work stays CLI-first. Phases 7-11 should complete the command-line product and core engine before the Python SDK and dashboard call into the same stable internals.
 
 ```text
 CLI
@@ -434,6 +501,8 @@ Core Engine
  |
  +--> Patch Review Service
  |
+ |
+ +--> Dev Pipeline
  |
  +--> Debugger Loop
  |
@@ -470,7 +539,7 @@ Phase 5 does not include a debugger loop or automatic patch application.
 
 ### Debugger Loop
 
-Uses failed test output as context for a debugger agent. The debugger may propose follow-up patch artifacts, but humans still review and apply patches explicitly.
+Phase 7 will use failed test output as context for a debugger agent. The debugger may propose follow-up patch artifacts, but humans still review and apply patches explicitly. Phase 6 only reports that this loop is needed and defers automatic repair.
 
 ### LLM Provider Layer
 

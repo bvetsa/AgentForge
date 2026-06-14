@@ -7,14 +7,19 @@ import typer
 
 from agentforge.config.loader import ConfigLoadError
 from agentforge.core.runner import WorkflowExecutionError, WorkflowRunner
+from agentforge.dev import DevPipelineError, DevPipelineRunner, DevRunResult, DevRunSession
 from agentforge.patches import PatchReviewError, PatchReviewService
 from agentforge.testing import DEFAULT_TEST_TIMEOUT_SECONDS, TestRunError, TestRunner
 
 app = typer.Typer(help="Run composable software-development agent workflows.")
 patch_app = typer.Typer(help="Review and apply patch proposals from a previous run.")
 test_app = typer.Typer(help="Detect and run project test commands.")
+dev_app = typer.Typer(help="Run the human-approved end-to-end development pipeline.")
 app.add_typer(patch_app, name="patch")
 app.add_typer(test_app, name="test")
+app.add_typer(dev_app, name="dev")
+
+DEFAULT_DEV_WORKFLOW_PATH = Path("examples/workflows/basic_feature.yaml")
 
 
 @app.callback()
@@ -244,9 +249,160 @@ def run_test_command(
         raise typer.Exit(code=1)
 
 
+@dev_app.command("run")
+def run_dev_pipeline(
+    input_text: Annotated[
+        str,
+        typer.Option("--input", help="Request for the dev pipeline to process."),
+    ],
+    project_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--project-root",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            resolve_path=True,
+            help="Project root where approved patches and tests should run.",
+        ),
+    ] = None,
+    workflow_path: Annotated[
+        Path,
+        typer.Option("--workflow", help="Workflow YAML file to run."),
+    ] = DEFAULT_DEV_WORKFLOW_PATH,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Apply all proposed patches without prompting."),
+    ] = False,
+    max_cycles: Annotated[
+        int,
+        typer.Option("--max-cycles", help="Maximum dev cycles. Defaults to 1 in Phase 6."),
+    ] = 1,
+) -> None:
+    """Run the Phase 6 end-to-end development pipeline."""
+    resolved_project_root = Path.cwd() if project_root is None else project_root
+    resolved_workflow_path = _resolve_workflow_path(workflow_path)
+
+    try:
+        pipeline = DevPipelineRunner()
+        session = pipeline.prepare(
+            user_request=input_text,
+            project_root=resolved_project_root,
+            workflow_path=resolved_workflow_path,
+            max_cycles=max_cycles,
+        )
+    except DevPipelineError as error:
+        typer.echo(f"Error: {error}", err=True)
+        if error.run_directory is not None:
+            typer.echo(f"Run artifacts: {error.run_directory}", err=True)
+        raise typer.Exit(code=1) from error
+
+    _echo_dev_approval_summary(session)
+    approved = yes
+    if not approved:
+        approved = typer.confirm("Apply all proposed patches?", default=False)
+
+    try:
+        result = pipeline.finish(session, approved=approved)
+    except DevPipelineError as error:
+        typer.echo(f"Error: {error}", err=True)
+        if error.run_directory is not None:
+            typer.echo(f"Run artifacts: {error.run_directory}", err=True)
+        raise typer.Exit(code=1) from error
+
+    _echo_dev_completion(result, approved=approved)
+
+
 def _exit_with_error(error: PatchReviewError) -> None:
     typer.echo(f"Error: {error}", err=True)
     raise typer.Exit(code=1) from error
+
+
+def _resolve_workflow_path(workflow_path: Path) -> Path:
+    if workflow_path.exists() or workflow_path.is_absolute():
+        return workflow_path.resolve(strict=False)
+
+    repository_candidate = Path(__file__).resolve().parents[2] / workflow_path
+    if repository_candidate.exists():
+        return repository_candidate.resolve()
+
+    return workflow_path.resolve(strict=False)
+
+
+def _echo_dev_approval_summary(session: DevRunSession) -> None:
+    typer.echo("AgentForge Dev Run")
+    typer.echo()
+    typer.echo("Request:")
+    typer.echo(session.user_request)
+    typer.echo()
+    typer.echo("Project root:")
+    typer.echo(str(session.project_root.resolve(strict=False)))
+    typer.echo()
+    typer.echo("Workflow:")
+    typer.echo(str(session.workflow_path))
+    typer.echo()
+    typer.echo(f"Cycle {session.cycle_number}")
+    typer.echo()
+    typer.echo("Planner:")
+    typer.echo(f"- {session.planner_summary}")
+    typer.echo()
+    typer.echo("Selected agents:")
+    if session.selected_agents:
+        for agent_name in session.selected_agents:
+            typer.echo(f"- {agent_name}")
+    else:
+        typer.echo("- None")
+    typer.echo()
+    typer.echo("Generated patches:")
+    if session.generated_patches:
+        for index, patch in enumerate(session.generated_patches, start=1):
+            typer.echo(f"{index}. {patch['id']} -> {patch['target_file']}")
+    else:
+        typer.echo("- None")
+    typer.echo()
+
+
+def _echo_dev_completion(result: DevRunResult, *, approved: bool) -> None:
+    if not approved:
+        typer.echo()
+        typer.echo("No changes were applied.")
+    else:
+        typer.echo()
+        typer.echo("Applying patches...")
+        if result.applied_patches:
+            for patch in result.applied_patches:
+                typer.echo(f"[ok] Applied {patch['id']}")
+        else:
+            typer.echo("[ok] No proposed patches to apply")
+
+        typer.echo()
+        typer.echo("Running tests...")
+        if result.test_command:
+            typer.echo(f"[ok] Detected command: {' '.join(result.test_command)}")
+        else:
+            typer.echo("[warn] No test command was selected")
+
+        if result.test_status == "passed":
+            typer.echo("[ok] Tests passed")
+        else:
+            typer.echo(f"[warn] Tests ended with status: {result.test_status}")
+
+    decision = result.planner_decisions[-1] if result.planner_decisions else {}
+    typer.echo()
+    typer.echo("Planner decision:")
+    notes = decision.get("notes", [])
+    if isinstance(notes, list):
+        for note in notes:
+            typer.echo(f"- {note}")
+    if decision.get("next_action"):
+        typer.echo(f"- Next action: {decision['next_action']}")
+
+    typer.echo()
+    typer.echo("Final verdict:")
+    typer.echo(result.final_verdict)
+    typer.echo()
+    typer.echo("Artifacts:")
+    typer.echo(str(result.run_directory))
 
 
 if __name__ == "__main__":

@@ -31,6 +31,70 @@ jobs:
       - name: Run CLI smoke test
         run: agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app" --no-project-context
 
+      - name: Run Phase 6 dev pipeline smoke test
+        run: |
+          TEMP_PROJECT="$(mktemp -d)"
+          cp -R examples/sample_project/. "$TEMP_PROJECT/"
+
+          agentforge dev run \
+            --project-root "$TEMP_PROJECT" \
+            --input "Add a todo endpoint to a FastAPI app" \
+            --yes
+
+          if [ ! -d ".agentforge/runs" ]; then
+            echo "No .agentforge/runs directory found"
+            exit 1
+          fi
+
+          RUN_ID=$(ls -t .agentforge/runs | head -n 1)
+
+          if [ -z "$RUN_ID" ]; then
+            echo "No run directories found"
+            exit 1
+          fi
+
+          RUN_ID="$RUN_ID" TEMP_PROJECT="$TEMP_PROJECT" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          run_id = os.environ["RUN_ID"]
+          temp_project = Path(os.environ["TEMP_PROJECT"]).resolve()
+          run_directory = Path(".agentforge/runs") / run_id
+          summary_path = run_directory / "dev_run_summary.json"
+          test_results_path = run_directory / "test_results.json"
+          test_output_path = run_directory / "test_output.txt"
+
+          if not summary_path.exists():
+              raise SystemExit(f"Missing dev run summary: {summary_path}")
+          if not test_results_path.exists():
+              raise SystemExit(f"Missing test results: {test_results_path}")
+          if not test_output_path.exists():
+              raise SystemExit(f"Missing test output: {test_output_path}")
+
+          summary = json.loads(summary_path.read_text())
+
+          if summary.get("project_root") != str(temp_project):
+              raise SystemExit(f"Unexpected project root: {summary.get('project_root')!r}")
+
+          if len(summary.get("generated_patches", [])) != 3:
+              raise SystemExit("Expected three generated patches")
+
+          if len(summary.get("applied_patches", [])) != 3:
+              raise SystemExit("Expected three applied patches")
+
+          if not summary.get("final_verdict"):
+              raise SystemExit("Expected a final verdict")
+
+          print("Phase 6 dev pipeline artifact verified")
+          PY
+
+          if ! git diff --quiet -- examples/sample_project; then
+            echo "Phase 6 smoke test modified tracked sample project files"
+            git diff --name-only -- examples/sample_project
+            exit 1
+          fi
+
       - name: Run patch workflow smoke test
         run: |
           agentforge run examples/workflows/basic_feature.yaml \
