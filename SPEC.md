@@ -30,7 +30,9 @@ Phase 4 implemented human-approved patch review and application commands. A user
 
 Phase 5 implemented deterministic project test command detection and safe execution. A user can run `agentforge test run --project-root <path>` without specifying a language, framework, or test command, or provide an explicit override with `--command`.
 
-The current scope is still intentionally limited. AgentForge does not automatically apply patches, start debugger loops, commit changes to Git, integrate real LLM APIs, provide a dashboard, or let agents dynamically decide which tools to call. File modification only happens after an explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command.
+Phase 6 implemented the end-to-end dev pipeline. A user can run `agentforge dev run --input "<request>"`, inspect generated patches at the approval gate, approve all proposed patches interactively or with `--yes`, and then have AgentForge apply approved patches and run safe detected tests in one artifact directory.
+
+The current scope is still intentionally limited. AgentForge does not start debugger/failure-repair loops, commit changes to Git, integrate real LLM APIs, provide a dashboard, dynamically create workflows, perform real LLM planning, or let agents dynamically decide which tools to call. File modification only happens after explicit human approval through `agentforge patch apply` or the Phase 6 dev pipeline approval gate.
 
 ## User Story
 
@@ -83,6 +85,16 @@ agentforge test run --project-root . --command "pytest"
 agentforge test run --project-root . --command "pytest" --timeout 30
 ```
 
+I can run the Phase 6 end-to-end development pipeline:
+
+```bash
+agentforge dev run --input "Add a todo endpoint to a FastAPI app"
+agentforge dev run --project-root examples/sample_project --input "Add a todo endpoint to a FastAPI app"
+agentforge dev run --project-root examples/sample_project --input "Add a todo endpoint to a FastAPI app" --yes
+```
+
+`--input` is required. `--project-root` is optional and defaults to the current working directory. `--workflow` is optional and defaults to `examples/workflows/basic_feature.yaml`. `--yes` applies all proposed patches without prompting. `--max-cycles` defaults to `1` in Phase 6 so the artifact shape can support future cycles without implementing the Phase 7 debugger loop yet.
+
 ## Workflow
 
 The initial workflow is:
@@ -123,6 +135,7 @@ Each agent reads specific keys from shared state and writes one new output key b
 - Human-approved patch review and application commands
 - Evidence-based project test command detection
 - Safe project test execution
+- End-to-end dev pipeline command
 - Saved run artifacts
 - Basic tests
 
@@ -135,15 +148,17 @@ AgentForge currently does not include:
 - Dashboard
 - SDK
 - Docker
-- Automatic patch application
+- Unapproved automatic patch application
 - Filesystem modification by agents
 - Git integration
-- Debugger loop
+- Debugger/failure-repair loop
 - User accounts
 - Agent marketplace
 - Autonomous app generation
 - Custom agent creation UI
 - Dynamic agent-decided tool calling
+- Dynamic workflow creation
+- Real LLM planning
 
 These exclusions are intentional. The completed phases build a reliable, understandable, and safe CLI foundation before adding more powerful behavior or additional surfaces.
 
@@ -151,15 +166,16 @@ These exclusions are intentional. The completed phases build a reliable, underst
 
 Planned work should proceed in this order:
 
-1. Phase 6: Debugger Loop
-2. Phase 7: Real LLM Provider Layer
-3. Phase 8: Dynamic Agent-Decided Tool Calling
-4. Phase 9: Custom Agents and Workflows
-5. Phase 10: CLI Cleanup and UX Polish
-6. Phase 11: Python SDK
-7. Phase 12: Dashboard
+1. Phase 6: End-to-End Dev Pipeline
+2. Phase 7: Debugger Loop
+3. Phase 8: Real LLM Provider Layer
+4. Phase 9: Dynamic Agent-Decided Tool Calling
+5. Phase 10: Custom Agents and Workflows
+6. Phase 11: CLI Cleanup and UX Polish
+7. Phase 12: Python SDK
+8. Phase 13: Dashboard
 
-Phases 6-10 complete the CLI and core engine first. The SDK and dashboard should come after the CLI product is stable.
+Phases 6-11 complete the CLI and core engine first. The SDK and dashboard should come after the CLI product is stable.
 
 ## Core Objects
 
@@ -314,6 +330,52 @@ Patch proposal `target_file` values must be project-relative source or test file
 
 Patch proposals must not point at `proposed/*.txt` files inside the project root.
 
+### Dev Run Summary
+
+Phase 6 adds `dev_run_summary.json` to the run artifact directory.
+
+It records:
+
+- `run_id`
+- `user_request`
+- `project_root`
+- `workflow_path`
+- `status`
+- `cycles`
+- `generated_patches`
+- `applied_patches`
+- `test_status`
+- `planner_decisions`
+- `final_verdict`
+
+The Phase 6 dev pipeline uses one run directory for the whole flow:
+
+```text
+.agentforge/runs/<run_id>/
+  input.txt
+  state.json
+  trace.json
+  tool_calls.json
+  patch_manifest.json
+  patches/
+  test_results.json, if tests were run
+  test_output.txt, if tests were run
+  final_report.md
+  dev_run_summary.json
+```
+
+The approval stop point shows generated patches and changed files, then asks `Apply all proposed patches? [y/N]:`. Default approval is no. Pressing Enter does not apply patches and does not run tests.
+
+The planner is the Phase 6 controller. Testing results go back to the planner stage conceptually. If tests pass, the planner records `send_to_reviewer`. If tests fail, Phase 6 records that another cycle/debugger loop is needed, but automatic repair is deferred to Phase 7. If max cycles are reached, the planner records a max-cycle note before the final verdict.
+
+Reviewer/final verdict is only reached after the planner decision. Reviewer is not used for the pre-approval stop point.
+
+Agent categories:
+
+- Customer-facing agents: `planner`, `reviewer`
+- Coding agents: `frontend`, `backend`
+- Post-coding agents: `testing`
+
 ### Trace
 
 Trace records each step of a workflow run.
@@ -408,6 +470,14 @@ The manifest is part of the run artifact contract and supports the Phase 4 revie
 - Missing patch IDs and missing patch files must fail with clear errors.
 - Phase 4 must not run tests after applying a patch.
 - Phase 4 must not commit changes to Git.
+- Phase 6 approval defaults to no.
+- Phase 6 must not apply patches before approval.
+- Phase 6 must not run tests if patches are not applied.
+- Phase 6 `--yes` may apply all proposed patches without prompting.
+- Phase 6 patch application must still be sandboxed to `project_root`.
+- Phase 6 tests must still use safe Phase 5 test execution.
+- Phase 6 must not call reviewer before approval.
+- Phase 6 must not implement automatic repair.
 - Project source files must not be modified by patch proposal generation.
 - Generated run artifacts under `.agentforge/runs/` are not source files and should not be committed.
 
@@ -428,6 +498,14 @@ trace.json
 tool_calls.json
 patch_manifest.json
 final_report.md
+```
+
+Phase 6 dev runs also write:
+
+```text
+dev_run_summary.json
+test_results.json, if tests were run
+test_output.txt, if tests were run
 ```
 
 Responsibilities:
