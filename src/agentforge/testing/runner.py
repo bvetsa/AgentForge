@@ -106,6 +106,7 @@ class TestRunner:
         project_root: str | Path,
         command: str | None = None,
         timeout_seconds: int = DEFAULT_TEST_TIMEOUT_SECONDS,
+        artifact_directory: str | Path | None = None,
     ) -> TestRunResult:
         """Run an explicit or auto-detected safe test command."""
         if timeout_seconds <= 0:
@@ -113,9 +114,14 @@ class TestRunner:
 
         root = Path(project_root).resolve()
         timestamp = datetime.now(UTC).isoformat()
-        run_id = self._create_run_id()
-        run_directory = self.runs_directory / run_id
-        run_directory.mkdir(parents=True, exist_ok=False)
+        if artifact_directory is None:
+            run_id = self._create_run_id()
+            run_directory = self.runs_directory / run_id
+            run_directory.mkdir(parents=True, exist_ok=False)
+        else:
+            run_directory = Path(artifact_directory)
+            run_id = run_directory.name
+            run_directory.mkdir(parents=True, exist_ok=True)
 
         assessments: list[CandidateAssessment] = []
         selected: TestCommandCandidate | None = None
