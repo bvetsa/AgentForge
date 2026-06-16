@@ -2,7 +2,7 @@
 
 ## Current Architecture
 
-AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection, patch proposal artifacts, human-approved patch application, safe project test command execution, and a Phase 6 end-to-end dev pipeline.
+AgentForge is currently a local-first CLI workflow engine with deterministic read-only project inspection, patch proposal artifacts, human-approved patch application, safe project test command execution, and a planner-controlled iterative dev pipeline.
 
 ```text
 CLI
@@ -60,14 +60,17 @@ DevPipelineRunner
  +--> Approval Gate
  +--> Patch Review Service
  +--> TestRunner
+ +--> Testing Report
  +--> Planner Decision
+ |      |
+ |      +--> Continue to next approved cycle
  v
 Final Verdict + Dev Run Summary
 ```
 
-Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution. Phase 6 added `agentforge dev run`, a human-approved end-to-end pipeline from request to patch proposals to approval to patch application to safe test execution to final verdict.
+Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution. Phase 6 added `agentforge dev run`, a human-approved end-to-end pipeline from request to patch proposals to approval to patch application to safe test execution to final verdict. Phase 7 added the planner-controlled iteration loop around that pipeline.
 
-AgentForge still does not implement a debugger/failure-repair loop, call real LLM APIs, dynamically create workflows, commit changes to Git, or let agents dynamically choose tools. Source modification requires human approval through `agentforge patch apply` or the Phase 6 dev pipeline approval gate.
+AgentForge does not implement a separate debugger agent, call real LLM APIs, dynamically create workflows, commit changes to Git, or let agents dynamically choose tools. Debugging and repair behavior comes from cycling the end-to-end dev pipeline under planner control. Source modification requires human approval through `agentforge patch apply` or the dev pipeline approval gate in every cycle.
 
 ## Phase 2 Tool Flow
 
@@ -126,13 +129,14 @@ Detailed flow:
 
 Phase 5 is deterministic. It does not use an LLM, start a debugger loop, apply patches, or commit changes.
 
-## Phase 6 Dev Pipeline Flow
+## Phase 7 Dev Pipeline Flow
 
 ```text
 CLI -> DevPipelineRunner -> WorkflowRunner(stop before reviewer)
     -> Patch Proposals -> Approval Gate
     -> PatchReviewService -> TestRunner
-    -> Planner Decision -> Final Verdict -> Dev Run Artifacts
+    -> Testing Report -> Planner Decision
+       -> Continue to next cycle or Final Verdict -> Dev Run Artifacts
 ```
 
 Detailed flow:
@@ -140,18 +144,20 @@ Detailed flow:
 1. The user runs `agentforge dev run --input "<request>"`.
 2. `--project-root` is optional and defaults to the current working directory.
 3. `--workflow` is optional and defaults to `examples/workflows/basic_feature.yaml`.
-4. The dev pipeline creates one run directory for the whole dev run.
-5. The workflow runner executes the selected workflow up to, but not including, `reviewer`.
-6. Patch-producing agents generate normal Phase 3 patch proposal artifacts.
-7. The CLI prints the request, resolved project root, workflow path, cycle number, planner summary, selected workflow agents, and generated patch IDs and target files.
-8. The human approval gate asks `Apply all proposed patches? [y/N]:`.
-9. Default approval is no. If the user presses Enter or answers no, no patches are applied and tests are not run.
-10. If the user answers yes or passes `--yes`, all proposals with status `proposed` are applied through the Phase 4 patch review service.
-11. Tests run through the Phase 5 `TestRunner`, and `test_results.json` plus `test_output.txt` are written into the same dev run directory.
-12. Test status goes back to the planner stage conceptually. The planner records whether to send to reviewer/final verdict, report that Phase 7 repair is needed, or include a max-cycle note.
-13. Reviewer/final verdict is printed only after the planner decision.
+4. `--max-cycles` defaults to `3`.
+5. The dev pipeline creates one run directory for the whole dev run.
+6. Each cycle executes the selected workflow up to, but not including, `reviewer`.
+7. Patch-producing agents generate normal Phase 3 patch proposal artifacts with cycle-prefixed IDs.
+8. The CLI prints the request, resolved project root, workflow path, cycle number, planner summary, selected workflow agents, and generated patch IDs and target files.
+9. The human approval gate asks `Apply all proposed patches for cycle <n>? [y/N]:`.
+10. Default approval is no. If the user presses Enter or answers no, no patches are applied and tests are not run.
+11. If the user answers yes or passes `--yes`, that cycle's proposals with status `proposed` are applied through the Phase 4 patch review service.
+12. Tests run through the Phase 5 `TestRunner`; latest `test_results.json` and `test_output.txt` plus per-cycle copies are written into the same dev run directory.
+13. The testing stage produces a structured testing report with status, summary, command, artifact paths, and recommended focus.
+14. Test status goes back to the planner stage conceptually. The deterministic Phase 7 planner policy records `return_final_verdict` when tests pass, `continue` when tests fail and cycles remain, `stopped_max_cycles` when tests fail at the cycle limit, or `stopped_user_declined` when approval is declined.
+15. Reviewer/final verdict is printed only after the planner decision returns a final outcome.
 
-The planner is the controller/orchestrator in Phase 6. Reviewer is not called before approval and is not used for the pre-approval change summary.
+The planner is the controller/orchestrator. Reviewer is not called before approval and is not used for the pre-approval change summary. There is no separate debugger agent; repair behavior comes from running another approved implementation cycle after failed tests.
 
 Agent categories:
 
@@ -159,7 +165,7 @@ Agent categories:
 - Coding agents: `frontend`, `backend`
 - Post-coding agents: `testing`
 
-Phase 6 intentionally does not implement automatic repair, dynamic workflow creation, real LLM planning, dynamic agent-decided tool calling, Git commits, SDK, dashboard, or Docker.
+Phase 7 intentionally uses deterministic/mock planner decisions. Real LLM planner reasoning, dynamic workflow creation, dynamic agent-decided tool calling, Git commits, SDK, dashboard, and Docker are not implemented.
 
 ## Components
 
@@ -218,7 +224,7 @@ Responsibilities:
 - Print one selected patch diff
 - Apply one selected patch only after explicit user invocation
 - Detect and safely run likely project test commands
-- Run the Phase 6 dev pipeline with an approval gate and final verdict
+- Run the dev pipeline with per-cycle approval, testing reports, planner decisions, and final verdicts
 
 The CLI stays thin. Most logic lives in the core engine and the dedicated test execution package.
 
@@ -459,12 +465,14 @@ patch_manifest.json
 final_report.md
 ```
 
-Phase 6 dev runs also write:
+Dev runs also write:
 
 ```text
 dev_run_summary.json
 test_results.json, if tests were run
 test_output.txt, if tests were run
+cycle_<n>_test_results.json, for each cycle that ran tests
+cycle_<n>_test_output.txt, for each cycle that ran tests
 ```
 
 Patch proposal files are written under:
@@ -503,8 +511,8 @@ Core Engine
  |
  |
  +--> Dev Pipeline
- |
- +--> Debugger Loop
+ |      |
+ |      +--> Planner-Controlled Iteration Loop
  |
  +--> LLM Provider Layer
  |
@@ -535,11 +543,11 @@ ProjectScanner -> ProjectEvidence -> TestCommandDetector -> TestCommandCandidate
     -> CommandSafetyValidator -> TestRunner
 ```
 
-Phase 5 does not include a debugger loop or automatic patch application.
+Phase 5 does not include patch application or planner-controlled repair cycles.
 
-### Debugger Loop
+### Planner-Controlled Iteration Loop
 
-Phase 7 will use failed test output as context for a debugger agent. The debugger may propose follow-up patch artifacts, but humans still review and apply patches explicitly. Phase 6 only reports that this loop is needed and defers automatic repair.
+Phase 7 uses failed test output to build a structured testing report, then records a deterministic planner decision. If tests fail and cycles remain, the planner selects `continue`, records a simple focus such as `implementation`, and the dev pipeline starts another workflow/coding cycle in the same run directory. There is no separate debugger agent. Humans still approve every cycle unless `--yes` is used.
 
 ### LLM Provider Layer
 
@@ -588,7 +596,7 @@ Expected views include:
 - Viewing tool call logs
 - Reviewing patches
 - Inspecting test output
-- Inspecting debugger loops
+- Inspecting planner-controlled iteration loops
 - Managing agents and workflows
 - Comparing runs
 

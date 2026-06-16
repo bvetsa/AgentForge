@@ -276,10 +276,10 @@ def run_dev_pipeline(
     ] = False,
     max_cycles: Annotated[
         int,
-        typer.Option("--max-cycles", help="Maximum dev cycles. Defaults to 1 in Phase 6."),
-    ] = 1,
+        typer.Option("--max-cycles", help="Maximum dev cycles. Defaults to 3."),
+    ] = 3,
 ) -> None:
-    """Run the Phase 6 end-to-end development pipeline."""
+    """Run the planner-controlled iterative development pipeline."""
     resolved_project_root = Path.cwd() if project_root is None else project_root
     resolved_workflow_path = _resolve_workflow_path(workflow_path)
 
@@ -297,20 +297,43 @@ def run_dev_pipeline(
             typer.echo(f"Run artifacts: {error.run_directory}", err=True)
         raise typer.Exit(code=1) from error
 
-    _echo_dev_approval_summary(session)
-    approved = yes
-    if not approved:
-        approved = typer.confirm("Apply all proposed patches?", default=False)
+    while True:
+        _echo_dev_approval_summary(session)
+        if not session.generated_patches:
+            approved = True
+        elif yes:
+            approved = True
+            typer.echo(
+                f"Patches for cycle {session.cycle_number} auto-approved by --yes."
+            )
+        else:
+            approved = typer.confirm(
+                f"Apply all proposed patches for cycle {session.cycle_number}?",
+                default=False,
+            )
 
-    try:
-        result = pipeline.finish(session, approved=approved)
-    except DevPipelineError as error:
-        typer.echo(f"Error: {error}", err=True)
-        if error.run_directory is not None:
-            typer.echo(f"Run artifacts: {error.run_directory}", err=True)
-        raise typer.Exit(code=1) from error
+        try:
+            result = pipeline.finish(session, approved=approved)
+        except DevPipelineError as error:
+            typer.echo(f"Error: {error}", err=True)
+            if error.run_directory is not None:
+                typer.echo(f"Run artifacts: {error.run_directory}", err=True)
+            raise typer.Exit(code=1) from error
 
-    _echo_dev_completion(result, approved=approved)
+        _echo_dev_cycle_completion(result, approved=approved)
+        decision = result.planner_decisions[-1] if result.planner_decisions else {}
+        if decision.get("next_action") != "continue":
+            _echo_dev_final_result(result)
+            break
+
+        _echo_dev_continue(result)
+        try:
+            session = pipeline.prepare_next_cycle(result)
+        except DevPipelineError as error:
+            typer.echo(f"Error: {error}", err=True)
+            if error.run_directory is not None:
+                typer.echo(f"Run artifacts: {error.run_directory}", err=True)
+            raise typer.Exit(code=1) from error
 
 
 def _exit_with_error(error: PatchReviewError) -> None:
@@ -345,6 +368,8 @@ def _echo_dev_approval_summary(session: DevRunSession) -> None:
     typer.echo()
     typer.echo("Planner:")
     typer.echo(f"- {session.planner_summary}")
+    if session.planned_focus:
+        typer.echo(f"- Focus: {session.planned_focus}")
     typer.echo()
     typer.echo("Selected agents:")
     if session.selected_agents:
@@ -362,30 +387,34 @@ def _echo_dev_approval_summary(session: DevRunSession) -> None:
     typer.echo()
 
 
-def _echo_dev_completion(result: DevRunResult, *, approved: bool) -> None:
+def _echo_dev_cycle_completion(result: DevRunResult, *, approved: bool) -> None:
     if not approved:
         typer.echo()
         typer.echo("No changes were applied.")
     else:
         typer.echo()
-        typer.echo("Applying patches...")
-        if result.applied_patches:
-            for patch in result.applied_patches:
-                typer.echo(f"[ok] Applied {patch['id']}")
+        if result.generated_patches:
+            typer.echo("Applying patches...")
+            if result.applied_patches:
+                for patch in result.applied_patches:
+                    typer.echo(f"[ok] Applied {patch['id']}")
+            else:
+                typer.echo("[ok] No proposed patches to apply")
         else:
-            typer.echo("[ok] No proposed patches to apply")
+            typer.echo("No patches were generated.")
 
-        typer.echo()
-        typer.echo("Running tests...")
-        if result.test_command:
-            typer.echo(f"[ok] Detected command: {' '.join(result.test_command)}")
-        else:
-            typer.echo("[warn] No test command was selected")
+        if result.test_status != "not_run":
+            typer.echo()
+            typer.echo("Running tests...")
+            if result.test_command:
+                typer.echo(f"[ok] Detected command: {' '.join(result.test_command)}")
+            else:
+                typer.echo("[warn] No test command was selected")
 
-        if result.test_status == "passed":
-            typer.echo("[ok] Tests passed")
-        else:
-            typer.echo(f"[warn] Tests ended with status: {result.test_status}")
+            if result.test_status == "passed":
+                typer.echo("[ok] Tests passed")
+            else:
+                typer.echo(f"[warn] Tests ended with status: {result.test_status}")
 
     decision = result.planner_decisions[-1] if result.planner_decisions else {}
     typer.echo()
@@ -396,7 +425,25 @@ def _echo_dev_completion(result: DevRunResult, *, approved: bool) -> None:
             typer.echo(f"- {note}")
     if decision.get("next_action"):
         typer.echo(f"- Next action: {decision['next_action']}")
+    if decision.get("recommended_focus"):
+        typer.echo(f"- Focus: {decision['recommended_focus']}")
 
+
+def _echo_dev_continue(result: DevRunResult) -> None:
+    typer.echo()
+    if result.test_status == "passed":
+        typer.echo("Tests passed.")
+    else:
+        typer.echo("Tests failed.")
+    typer.echo("Planner decision:")
+    typer.echo("- Continue to another cycle.")
+    decision = result.planner_decisions[-1] if result.planner_decisions else {}
+    focus = decision.get("recommended_focus")
+    if focus:
+        typer.echo(f"- Focus: {focus}.")
+
+
+def _echo_dev_final_result(result: DevRunResult) -> None:
     typer.echo()
     typer.echo("Final verdict:")
     typer.echo(result.final_verdict)

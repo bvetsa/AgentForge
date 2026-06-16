@@ -226,7 +226,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Optional `--project-root <path>` defaulting to the current working directory
 - Optional `--workflow <path>` defaulting to `examples/workflows/basic_feature.yaml`
 - `--yes` to apply all proposed patches without prompting
-- `--max-cycles <int>` defaulting to `1`
+- `--max-cycles <int>` defaulting to `1` in Phase 6
 - One run directory for the whole dev run
 - Workflow execution through the existing workflow runner, stopped before reviewer
 - Existing Phase 3 patch proposal generation
@@ -252,32 +252,47 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Reviewer/final verdict is not used for the pre-approval change summary.
 - Testing results go back to the planner stage conceptually, not directly to reviewer.
 - Planner controls whether the pipeline returns a final verdict or reports that another cycle is needed.
-- True debugger/failure-repair loop is deferred to Phase 7.
+- True planner-controlled iteration loop is deferred to Phase 7.
 - Dynamic workflow creation is not implemented.
 - Dynamic agent selection is not implemented.
 - Real LLM planning is not implemented.
 - No Git commits.
 - No SDK, dashboard, or Docker.
 
-## Phase 7: Debugger Loop
+## Phase 7: Planner-Controlled Iteration Loop
 
-**Goal:** Use failed test output as input for a debugger agent that proposes follow-up patches.
+**Goal:** Add the iterative development loop without adding a separate debugger agent.
 
-**Status:** Planned.
+**Status:** Implemented.
 
-**Features:**
+**Implemented features:**
 
-- Debugger Agent
-- Failed test output passed into debugger context
-- Follow-up patch proposal artifacts
-- Trace logging for debugger attempts
-- Clear stop conditions and retry limits
+- `agentforge dev run` can run multiple cycles.
+- `--max-cycles <int>` defaults to `3`.
+- One run directory is used for the whole dev run.
+- Each cycle runs the workflow/coding stage, stops before reviewer, generates patch proposals, prints summaries, and requires approval before applying patches.
+- `--yes` auto-approves every cycle.
+- Patch IDs are cycle-prefixed so proposals do not collide across cycles.
+- Tests run only after approved patches are applied.
+- Latest `test_results.json` and `test_output.txt` are retained, with per-cycle copies such as `cycle_1_test_results.json`.
+- Each cycle records a structured testing report.
+- Planner decisions are deterministic/mock policy:
+  - tests passed -> `return_final_verdict`
+  - tests failed below max cycles -> `continue`
+  - tests failed at max cycles -> `stopped_max_cycles`
+  - approval declined -> `stopped_user_declined`
+- `dev_run_summary.json` records generated patches, approval status, applied patches, testing report, planner decision, and final verdict or stop reason for each cycle.
 
 **Important constraints:**
 
 - Human still reviews and applies patches.
+- `--yes` is the only approval bypass and applies to every cycle.
 - No hidden file modification.
 - No Git commits.
+- No separate debugger agent.
+- No real LLM planner reasoning.
+- No dynamic workflow creation.
+- No dynamic tool calling.
 
 ## Phase 8: Real LLM Provider Layer
 
@@ -383,7 +398,7 @@ The SDK should expose the core workflow engine without requiring the CLI.
 - Inspect tool call logs
 - Review patches
 - Inspect test results
-- Inspect debugger loops
+- Inspect planner-controlled iteration loops
 - Manage agents and workflows
 - Compare runs
 

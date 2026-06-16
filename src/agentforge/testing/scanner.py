@@ -22,6 +22,7 @@ class ProjectScanner:
     """Collect project evidence that may identify a likely test command."""
 
     _ignored_directories = {
+        ".agentforge",
         ".git",
         ".mypy_cache",
         ".pytest_cache",
