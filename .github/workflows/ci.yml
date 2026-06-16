@@ -31,7 +31,7 @@ jobs:
       - name: Run CLI smoke test
         run: agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app" --no-project-context
 
-      - name: Run Phase 6 dev pipeline smoke test
+      - name: Run Phase 7 iterative dev loop smoke test
         run: |
           TEMP_PROJECT="$(mktemp -d)"
           cp -R examples/sample_project/. "$TEMP_PROJECT/"
@@ -39,19 +39,22 @@ jobs:
           agentforge dev run \
             --project-root "$TEMP_PROJECT" \
             --input "Add a todo endpoint to a FastAPI app" \
-            --yes
+            --yes \
+            --max-cycles 2
 
           if [ ! -d ".agentforge/runs" ]; then
             echo "No .agentforge/runs directory found"
             exit 1
           fi
 
-          RUN_ID=$(ls -t .agentforge/runs | head -n 1)
+          RUN_DIRECTORY=$(ls -td .agentforge/runs/* | head -n 1)
 
-          if [ -z "$RUN_ID" ]; then
+          if [ -z "$RUN_DIRECTORY" ]; then
             echo "No run directories found"
             exit 1
           fi
+
+          RUN_ID=$(basename "$RUN_DIRECTORY")
 
           RUN_ID="$RUN_ID" TEMP_PROJECT="$TEMP_PROJECT" python - <<'PY'
           import json
@@ -62,36 +65,115 @@ jobs:
           temp_project = Path(os.environ["TEMP_PROJECT"]).resolve()
           run_directory = Path(".agentforge/runs") / run_id
           summary_path = run_directory / "dev_run_summary.json"
-          test_results_path = run_directory / "test_results.json"
-          test_output_path = run_directory / "test_output.txt"
+          manifest_path = run_directory / "patch_manifest.json"
 
           if not summary_path.exists():
               raise SystemExit(f"Missing dev run summary: {summary_path}")
-          if not test_results_path.exists():
-              raise SystemExit(f"Missing test results: {test_results_path}")
-          if not test_output_path.exists():
-              raise SystemExit(f"Missing test output: {test_output_path}")
+          if not manifest_path.exists():
+              raise SystemExit(f"Missing patch manifest: {manifest_path}")
 
           summary = json.loads(summary_path.read_text())
+          manifest = json.loads(manifest_path.read_text())
 
           if summary.get("project_root") != str(temp_project):
               raise SystemExit(f"Unexpected project root: {summary.get('project_root')!r}")
 
-          if len(summary.get("generated_patches", [])) != 3:
-              raise SystemExit("Expected three generated patches")
+          if summary.get("max_cycles") != 2:
+              raise SystemExit(f"Expected max_cycles=2, got {summary.get('max_cycles')!r}")
 
-          if len(summary.get("applied_patches", [])) != 3:
-              raise SystemExit("Expected three applied patches")
+          cycles = summary.get("cycles")
+          if not isinstance(cycles, list) or not 1 <= len(cycles) <= 2:
+              raise SystemExit(f"Expected 1-2 cycles, got {cycles!r}")
 
-          if not summary.get("final_verdict"):
+          patch_ids = []
+          for cycle in cycles:
+              cycle_number = cycle.get("cycle")
+              generated_patches = cycle.get("generated_patches")
+              if not isinstance(generated_patches, list) or not generated_patches:
+                  raise SystemExit(f"Cycle {cycle_number} missing generated_patches")
+
+              approval = cycle.get("approval")
+              if approval != "approved":
+                  raise SystemExit(f"Cycle {cycle_number} expected approved, got {approval!r}")
+
+              applied_patches = cycle.get("applied_patches")
+              if not isinstance(applied_patches, list) or not applied_patches:
+                  raise SystemExit(f"Cycle {cycle_number} missing applied_patches")
+
+              testing_report = cycle.get("testing_report")
+              if cycle.get("test_status") != "not_run":
+                  if not isinstance(testing_report, dict):
+                      raise SystemExit(f"Cycle {cycle_number} missing testing_report")
+                  if not testing_report.get("status"):
+                      raise SystemExit(f"Cycle {cycle_number} testing_report missing status")
+
+              planner_decision = cycle.get("planner_decision")
+              if not isinstance(planner_decision, dict):
+                  raise SystemExit(f"Cycle {cycle_number} missing planner_decision")
+              if planner_decision.get("testing_report") != testing_report:
+                  raise SystemExit(
+                      f"Cycle {cycle_number} planner_decision missing testing_report"
+                  )
+
+              patch_ids.extend(
+                  patch.get("id")
+                  for patch in generated_patches
+                  if isinstance(patch, dict)
+              )
+
+          if len(patch_ids) != len(set(patch_ids)):
+              raise SystemExit(f"Patch IDs collided across cycles: {patch_ids!r}")
+
+          manifest_ids = [
+              patch.get("id")
+              for patch in manifest
+              if isinstance(patch, dict)
+          ]
+          if len(manifest_ids) != len(set(manifest_ids)):
+              raise SystemExit(f"Manifest patch IDs collided: {manifest_ids!r}")
+
+          final_verdict = summary.get("final_verdict")
+          if not final_verdict:
               raise SystemExit("Expected a final verdict")
 
-          print("Phase 6 dev pipeline artifact verified")
+          final_decision = cycles[-1]["planner_decision"]
+          final_action = final_decision.get("next_action")
+          test_status = summary.get("test_status")
+
+          if test_status == "passed":
+              if final_action != "return_final_verdict":
+                  raise SystemExit(
+                      f"Expected return_final_verdict for passed tests, got {final_action!r}"
+                  )
+              if summary.get("status") != "tests_passed":
+                  raise SystemExit(f"Unexpected passed status: {summary.get('status')!r}")
+          elif final_action == "stopped_max_cycles":
+              if test_status != "failed":
+                  raise SystemExit(f"Expected failed tests at max cycles, got {test_status!r}")
+              if len(cycles) != 2:
+                  raise SystemExit(f"Expected two cycles at max_cycles, got {len(cycles)}")
+              if summary.get("status") != "max_cycles_reached":
+                  raise SystemExit(f"Unexpected max-cycle status: {summary.get('status')!r}")
+              if "max cycles (2)" not in final_verdict:
+                  raise SystemExit(f"Unexpected max-cycle verdict: {final_verdict!r}")
+          else:
+              raise SystemExit(
+                  "Final state was neither tests-passed nor max-cycles-reached: "
+                  f"test_status={test_status!r}, action={final_action!r}"
+              )
+
+          print("Phase 7 iterative dev loop artifact verified")
           PY
 
-          if ! git diff --quiet -- examples/sample_project; then
-            echo "Phase 6 smoke test modified tracked sample project files"
-            git diff --name-only -- examples/sample_project
+          if [ -n "$(git ls-files -- .agentforge/runs)" ]; then
+            echo ".agentforge/runs artifacts must not be committed"
+            git ls-files -- .agentforge/runs
+            exit 1
+          fi
+
+          if ! git diff --quiet; then
+            echo "Phase 7 smoke test modified tracked files"
+            git diff --name-only
             exit 1
           fi
 
