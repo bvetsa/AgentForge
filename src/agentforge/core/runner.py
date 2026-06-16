@@ -63,10 +63,13 @@ class WorkflowRunner:
         project_root: str | Path | None = None,
         use_project_context: bool = True,
         stop_before_agent_names: set[str] | None = None,
+        run_id: str | None = None,
+        patch_id_prefix: str = "",
+        merge_patch_manifest: bool = False,
     ) -> RunResult:
         """Run a workflow and persist its artifacts."""
         workflow = Workflow.from_file(workflow_path)
-        run_id = self._create_run_id()
+        run_id = run_id or self._create_run_id()
         state = WorkflowState.from_user_request(input_text)
         trace_log = TraceLog()
         tool_registry = self._create_tool_registry(project_root, use_project_context)
@@ -100,6 +103,7 @@ class WorkflowRunner:
                     agent_outputs,
                     tool_call_log,
                     patch_proposals,
+                    merge_patch_manifest=merge_patch_manifest,
                 )
                 raise WorkflowExecutionError(
                     f"Workflow '{workflow.config.name}' failed: {error}. "
@@ -110,12 +114,13 @@ class WorkflowRunner:
             state.set_output(agent.config.output_key, output)
             agent_outputs.append((agent.config.name, output))
             if agent.config.produces_patches:
-                patch_proposals.append(
-                    self.patch_generator.create(
-                        agent.config,
-                        sequence=len(patch_proposals) + 1,
-                    )
+                proposal = self.patch_generator.create(
+                    agent.config,
+                    sequence=len(patch_proposals) + 1,
                 )
+                if patch_id_prefix:
+                    proposal = _prefix_patch_proposal(proposal, patch_id_prefix)
+                patch_proposals.append(proposal)
             trace_log.append_success(agent.config)
 
         run_directory = self._write_artifacts(
@@ -127,6 +132,7 @@ class WorkflowRunner:
             agent_outputs,
             tool_call_log,
             patch_proposals,
+            merge_patch_manifest=merge_patch_manifest,
         )
         return RunResult(
             run_id=run_id,
@@ -148,6 +154,7 @@ class WorkflowRunner:
         agent_outputs: list[tuple[str, str]],
         tool_call_log: ToolCallLog,
         patch_proposals: list[PatchProposal],
+        merge_patch_manifest: bool = False,
     ) -> Path:
         return self.artifact_writer.write(
             run_id=run_id,
@@ -158,6 +165,7 @@ class WorkflowRunner:
             agent_outputs=agent_outputs,
             tool_calls=tool_call_log.to_list(),
             patch_proposals=patch_proposals,
+            merge_patch_manifest=merge_patch_manifest,
         )
 
     @staticmethod
@@ -231,3 +239,13 @@ class WorkflowRunner:
     def _create_run_id() -> str:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         return f"{timestamp}-{uuid4().hex[:8]}"
+
+
+def _prefix_patch_proposal(proposal: PatchProposal, prefix: str) -> PatchProposal:
+    patch_id = f"{prefix}{proposal.id}"
+    return proposal.model_copy(
+        update={
+            "id": patch_id,
+            "patch_file": f"patches/{patch_id}.diff",
+        }
+    )

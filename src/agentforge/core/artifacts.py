@@ -25,10 +25,11 @@ class ArtifactWriter:
         agent_outputs: list[tuple[str, str]],
         tool_calls: list[dict[str, Any]],
         patch_proposals: list[PatchProposal] | None = None,
+        merge_patch_manifest: bool = False,
     ) -> Path:
         """Write all artifacts for one workflow run and return its directory."""
         run_directory = self.runs_directory / run_id
-        run_directory.mkdir(parents=True, exist_ok=False)
+        run_directory.mkdir(parents=True, exist_ok=merge_patch_manifest)
         patch_proposals = patch_proposals or []
 
         (run_directory / "input.txt").write_text(f"{input_text}\n", encoding="utf-8")
@@ -36,25 +37,75 @@ class ArtifactWriter:
         self._write_json(run_directory / "trace.json", trace_events)
         self._write_json(run_directory / "tool_calls.json", tool_calls)
         self.patch_writer.write(run_directory, patch_proposals)
-        self._write_json(
-            run_directory / "patch_manifest.json",
-            [proposal.model_dump() for proposal in patch_proposals],
-        )
-        (run_directory / "final_report.md").write_text(
-            self._build_final_report(
-                workflow_name,
-                input_text,
-                agent_outputs,
-                patch_proposals,
-            ),
-            encoding="utf-8",
+        manifest_data = [proposal.model_dump() for proposal in patch_proposals]
+        if merge_patch_manifest:
+            manifest_data = self._merge_patch_manifest(run_directory, manifest_data)
+        self._write_json(run_directory / "patch_manifest.json", manifest_data)
+        self._write_final_report(
+            run_directory=run_directory,
+            workflow_name=workflow_name,
+            input_text=input_text,
+            agent_outputs=agent_outputs,
+            patch_proposals=patch_proposals,
+            append=merge_patch_manifest,
         )
 
         return run_directory
 
     @staticmethod
+    def _merge_patch_manifest(
+        run_directory: Path,
+        patch_proposals: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        manifest_path = run_directory / "patch_manifest.json"
+        if not manifest_path.exists():
+            return patch_proposals
+
+        try:
+            existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return patch_proposals
+        if not isinstance(existing, list):
+            return patch_proposals
+
+        proposal_ids = {
+            proposal.get("id")
+            for proposal in patch_proposals
+            if isinstance(proposal, dict)
+        }
+        retained = [
+            proposal
+            for proposal in existing
+            if isinstance(proposal, dict) and proposal.get("id") not in proposal_ids
+        ]
+        return retained + patch_proposals
+
+    @staticmethod
     def _write_json(path: Path, data: Any) -> None:
         path.write_text(f"{json.dumps(data, indent=2, sort_keys=True)}\n", encoding="utf-8")
+
+    @classmethod
+    def _write_final_report(
+        cls,
+        *,
+        run_directory: Path,
+        workflow_name: str,
+        input_text: str,
+        agent_outputs: list[tuple[str, str]],
+        patch_proposals: list[PatchProposal],
+        append: bool,
+    ) -> None:
+        report_path = run_directory / "final_report.md"
+        report_text = cls._build_final_report(
+            workflow_name,
+            input_text,
+            agent_outputs,
+            patch_proposals,
+        )
+        if append and report_path.exists():
+            existing = report_path.read_text(encoding="utf-8").rstrip()
+            report_text = f"{existing}\n\n---\n\n{report_text}"
+        report_path.write_text(report_text, encoding="utf-8")
 
     @staticmethod
     def _build_final_report(

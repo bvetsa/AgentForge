@@ -11,6 +11,7 @@ from agentforge.tools.base import Tool, ToolError
 from agentforge.tools.registry import ToolRegistry
 
 IGNORED_DIRECTORIES = {
+    ".agentforge",
     ".git",
     ".venv",
     "__pycache__",
