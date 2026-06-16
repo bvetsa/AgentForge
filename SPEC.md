@@ -32,7 +32,9 @@ Phase 5 implemented deterministic project test command detection and safe execut
 
 Phase 6 implemented the end-to-end dev pipeline. A user can run `agentforge dev run --input "<request>"`, inspect generated patches at the approval gate, approve all proposed patches interactively or with `--yes`, and then have AgentForge apply approved patches and run safe detected tests in one artifact directory.
 
-The current scope is still intentionally limited. AgentForge does not start debugger/failure-repair loops, commit changes to Git, integrate real LLM APIs, provide a dashboard, dynamically create workflows, perform real LLM planning, or let agents dynamically decide which tools to call. File modification only happens after explicit human approval through `agentforge patch apply` or the Phase 6 dev pipeline approval gate.
+Phase 7 implemented the planner-controlled iteration loop. If tests fail and cycles remain, the testing report goes back to the planner, the planner deterministically records `continue`, another implementation cycle runs, and approval is required again before applying patches.
+
+The current scope is still intentionally limited. AgentForge does not have a separate debugger agent, commit changes to Git, integrate real LLM APIs, provide a dashboard, dynamically create workflows, perform real LLM planning, or let agents dynamically decide which tools to call. Debugging/repair behavior comes from cycling the end-to-end pipeline. File modification only happens after explicit human approval through `agentforge patch apply` or the dev pipeline approval gate.
 
 ## User Story
 
@@ -85,15 +87,16 @@ agentforge test run --project-root . --command "pytest"
 agentforge test run --project-root . --command "pytest" --timeout 30
 ```
 
-I can run the Phase 6 end-to-end development pipeline:
+I can run the planner-controlled development pipeline:
 
 ```bash
 agentforge dev run --input "Add a todo endpoint to a FastAPI app"
 agentforge dev run --project-root examples/sample_project --input "Add a todo endpoint to a FastAPI app"
 agentforge dev run --project-root examples/sample_project --input "Add a todo endpoint to a FastAPI app" --yes
+agentforge dev run --project-root examples/sample_project --input "Add a todo endpoint to a FastAPI app" --max-cycles 3
 ```
 
-`--input` is required. `--project-root` is optional and defaults to the current working directory. `--workflow` is optional and defaults to `examples/workflows/basic_feature.yaml`. `--yes` applies all proposed patches without prompting. `--max-cycles` defaults to `1` in Phase 6 so the artifact shape can support future cycles without implementing the Phase 7 debugger loop yet.
+`--input` is required. `--project-root` is optional and defaults to the current working directory. `--workflow` is optional and defaults to `examples/workflows/basic_feature.yaml`. `--yes` applies all proposed patches in every cycle without prompting. `--max-cycles` defaults to `3`.
 
 ## Workflow
 
@@ -151,7 +154,7 @@ AgentForge currently does not include:
 - Unapproved automatic patch application
 - Filesystem modification by agents
 - Git integration
-- Debugger/failure-repair loop
+- Separate debugger agent
 - User accounts
 - Agent marketplace
 - Autonomous app generation
@@ -166,16 +169,14 @@ These exclusions are intentional. The completed phases build a reliable, underst
 
 Planned work should proceed in this order:
 
-1. Phase 6: End-to-End Dev Pipeline
-2. Phase 7: Debugger Loop
-3. Phase 8: Real LLM Provider Layer
-4. Phase 9: Dynamic Agent-Decided Tool Calling
-5. Phase 10: Custom Agents and Workflows
-6. Phase 11: CLI Cleanup and UX Polish
-7. Phase 12: Python SDK
-8. Phase 13: Dashboard
+1. Phase 8: Real LLM Provider Layer
+2. Phase 9: Dynamic Agent-Decided Tool Calling
+3. Phase 10: Custom Agents and Workflows
+4. Phase 11: CLI Cleanup and UX Polish
+5. Phase 12: Python SDK
+6. Phase 13: Dashboard
 
-Phases 6-11 complete the CLI and core engine first. The SDK and dashboard should come after the CLI product is stable.
+Phases 8-11 continue the CLI and core engine work. The SDK and dashboard should come after the CLI product is stable.
 
 ## Core Objects
 
@@ -332,7 +333,7 @@ Patch proposals must not point at `proposed/*.txt` files inside the project root
 
 ### Dev Run Summary
 
-Phase 6 adds `dev_run_summary.json` to the run artifact directory.
+Dev runs add `dev_run_summary.json` to the run artifact directory.
 
 It records:
 
@@ -340,15 +341,17 @@ It records:
 - `user_request`
 - `project_root`
 - `workflow_path`
+- `max_cycles`
 - `status`
 - `cycles`
 - `generated_patches`
 - `applied_patches`
 - `test_status`
+- `test_command`
 - `planner_decisions`
 - `final_verdict`
 
-The Phase 6 dev pipeline uses one run directory for the whole flow:
+The dev pipeline uses one run directory for the whole flow:
 
 ```text
 .agentforge/runs/<run_id>/
@@ -360,13 +363,17 @@ The Phase 6 dev pipeline uses one run directory for the whole flow:
   patches/
   test_results.json, if tests were run
   test_output.txt, if tests were run
+  cycle_1_test_results.json, if cycle 1 ran tests
+  cycle_1_test_output.txt, if cycle 1 ran tests
   final_report.md
   dev_run_summary.json
 ```
 
-The approval stop point shows generated patches and changed files, then asks `Apply all proposed patches? [y/N]:`. Default approval is no. Pressing Enter does not apply patches and does not run tests.
+The approval stop point shows generated patches and changed files, then asks `Apply all proposed patches for cycle <n>? [y/N]:`. Default approval is no. Pressing Enter does not apply patches and does not run tests. `--yes` auto-approves every cycle.
 
-The planner is the Phase 6 controller. Testing results go back to the planner stage conceptually. If tests pass, the planner records `send_to_reviewer`. If tests fail, Phase 6 records that another cycle/debugger loop is needed, but automatic repair is deferred to Phase 7. If max cycles are reached, the planner records a max-cycle note before the final verdict.
+Each cycle records generated patches, approval status, applied patches, a structured testing report, a planner decision, and a final verdict or stop reason. The testing report includes `status`, `summary`, `test_command`, `test_results_artifact`, `test_output_artifact`, and `recommended_focus`.
+
+The planner is the controller. Testing results go back to the planner stage conceptually. If tests pass, the planner records `return_final_verdict` with reason `Tests passed.` If tests fail and the current cycle is below `max_cycles`, the planner records `continue`, a deterministic recommended focus such as `implementation`, and selected next-cycle agents such as `backend` and `testing`. If tests fail at `max_cycles`, the planner records `stopped_max_cycles`. If approval is declined, the planner records `stopped_user_declined`.
 
 Reviewer/final verdict is only reached after the planner decision. Reviewer is not used for the pre-approval stop point.
 
@@ -470,14 +477,15 @@ The manifest is part of the run artifact contract and supports the Phase 4 revie
 - Missing patch IDs and missing patch files must fail with clear errors.
 - Phase 4 must not run tests after applying a patch.
 - Phase 4 must not commit changes to Git.
-- Phase 6 approval defaults to no.
-- Phase 6 must not apply patches before approval.
-- Phase 6 must not run tests if patches are not applied.
-- Phase 6 `--yes` may apply all proposed patches without prompting.
-- Phase 6 patch application must still be sandboxed to `project_root`.
-- Phase 6 tests must still use safe Phase 5 test execution.
-- Phase 6 must not call reviewer before approval.
-- Phase 6 must not implement automatic repair.
+- Dev pipeline approval defaults to no in every cycle.
+- Dev pipeline must not apply patches before approval.
+- Dev pipeline must not run tests if patches are not applied.
+- Dev pipeline `--yes` may apply all proposed patches in every cycle without prompting.
+- Dev pipeline patch application must still be sandboxed to `project_root`.
+- Dev pipeline tests must still use safe Phase 5 test execution.
+- Dev pipeline must not call reviewer before approval.
+- Dev pipeline repair behavior must come from planner-controlled cycles, not a separate debugger agent.
+- Real LLM planner reasoning, dynamic workflow creation, and dynamic tool calling are not implemented.
 - Project source files must not be modified by patch proposal generation.
 - Generated run artifacts under `.agentforge/runs/` are not source files and should not be committed.
 
@@ -500,12 +508,14 @@ patch_manifest.json
 final_report.md
 ```
 
-Phase 6 dev runs also write:
+Dev runs also write:
 
 ```text
 dev_run_summary.json
 test_results.json, if tests were run
 test_output.txt, if tests were run
+cycle_<n>_test_results.json, for each cycle that ran tests
+cycle_<n>_test_output.txt, for each cycle that ran tests
 ```
 
 Responsibilities:
