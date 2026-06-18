@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from agentforge.core.runner import WorkflowExecutionError, WorkflowRunner
+from agentforge.llm import AgentInvocation, AgentResponse, LLMProvider, MockLLMProvider
 from agentforge.patches import PatchProposal
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -50,6 +51,7 @@ def test_basic_workflow_run_uses_current_directory_for_project_context(
         "state.json",
         "trace.json",
         "tool_calls.json",
+        "llm_calls.json",
         "final_report.md",
     }
     assert {path.name for path in result.run_directory.iterdir()} == expected_files
@@ -59,6 +61,9 @@ def test_basic_workflow_run_uses_current_directory_for_project_context(
     saved_tool_calls = json.loads(
         (result.run_directory / "tool_calls.json").read_text(encoding="utf-8")
     )
+    saved_llm_calls = json.loads(
+        (result.run_directory / "llm_calls.json").read_text(encoding="utf-8")
+    )
     patch_manifest = json.loads(
         (result.run_directory / "patch_manifest.json").read_text(encoding="utf-8")
     )
@@ -67,6 +72,19 @@ def test_basic_workflow_run_uses_current_directory_for_project_context(
     assert saved_state == result.state
     assert saved_trace == result.trace_events
     assert saved_tool_calls == result.tool_calls
+    assert saved_llm_calls == result.llm_calls
+    assert [call["agent"] for call in saved_llm_calls] == [
+        "planner",
+        "frontend",
+        "backend",
+        "testing",
+        "reviewer",
+    ]
+    assert all(call["provider"] == "mock" for call in saved_llm_calls)
+    assert all(call["model"] == "mock-deterministic-v1" for call in saved_llm_calls)
+    assert saved_llm_calls[0]["response_content"] == result.state["plan"]
+    assert "## System Prompt" in saved_llm_calls[0]["prompt"]
+    assert "tool_context" in saved_llm_calls[0]["inputs"]
     assert patch_manifest == result.patch_proposals
     assert [proposal["agent_name"] for proposal in patch_manifest] == [
         "frontend",
@@ -138,8 +156,66 @@ def test_workflow_run_with_no_project_context_writes_empty_tool_calls(tmp_path: 
     assert "tool_context" not in result.state["plan"]
     tool_calls_path = result.run_directory / "tool_calls.json"
     assert json.loads(tool_calls_path.read_text(encoding="utf-8")) == []
+    llm_calls_path = result.run_directory / "llm_calls.json"
+    llm_calls = json.loads(llm_calls_path.read_text(encoding="utf-8"))
+    assert len(llm_calls) == 5
+    assert "tool_context" not in llm_calls[0]["inputs"]
     patch_manifest_path = result.run_directory / "patch_manifest.json"
     assert patch_manifest_path.exists()
+
+
+def test_mock_provider_returns_agent_response() -> None:
+    invocation = AgentInvocation(
+        agent_name="planner",
+        description="Plans work.",
+        system_prompt="Produce a plan.",
+        input_keys=["user_request"],
+        output_key="plan",
+        inputs={"user_request": "Plan a todo endpoint"},
+        prompt="prompt text",
+    )
+
+    response = MockLLMProvider().generate(invocation)
+
+    assert isinstance(response, AgentResponse)
+    assert response.provider == "mock"
+    assert response.model == "mock-deterministic-v1"
+    assert response.metadata == {"deterministic": True, "offline": True}
+    assert response.content == (
+        "Mock output from planner\n\nInputs:\n- user_request: Plan a todo endpoint"
+    )
+
+
+def test_workflow_runner_builds_agent_invocations_for_provider(tmp_path: Path) -> None:
+    provider = RecordingProvider()
+    runner = WorkflowRunner(
+        llm_provider=provider,
+        runs_directory=tmp_path / ".agentforge/runs",
+    )
+
+    result = runner.run(
+        PROJECT_ROOT / "examples/workflows/basic_feature.yaml",
+        "Add a todo endpoint to a FastAPI app",
+        use_project_context=False,
+    )
+
+    assert [invocation.agent_name for invocation in provider.invocations] == [
+        "planner",
+        "frontend",
+        "backend",
+        "testing",
+        "reviewer",
+    ]
+    first_invocation = provider.invocations[0]
+    assert first_invocation.output_key == "plan"
+    assert first_invocation.inputs == {
+        "user_request": "Add a todo endpoint to a FastAPI app"
+    }
+    assert first_invocation.prompt.startswith("# Agent\nplanner\n")
+    assert "## System Prompt" in first_invocation.prompt
+    assert result.state["plan"] == "Provider output from planner"
+    assert all(call["provider"] == "recording" for call in result.llm_calls)
+    assert all(call["model"] == "recording-model" for call in result.llm_calls)
 
 
 def test_workflow_runner_accepts_an_explicit_patch_generator(tmp_path: Path) -> None:
@@ -207,6 +283,8 @@ agents:
     ]
     patch_manifest_path = error.value.run_directory / "patch_manifest.json"
     assert json.loads(patch_manifest_path.read_text(encoding="utf-8")) == []
+    llm_calls_path = error.value.run_directory / "llm_calls.json"
+    assert json.loads(llm_calls_path.read_text(encoding="utf-8")) == []
 
 
 def test_patch_manifest_contains_empty_list_when_no_patches_are_generated(tmp_path: Path) -> None:
@@ -299,4 +377,18 @@ class CustomPatchGenerator:
             patch_file=f"patches/custom-{sequence}.diff",
             status="proposed",
             diff=diff,
+        )
+
+
+class RecordingProvider(LLMProvider):
+    def __init__(self) -> None:
+        self.invocations: list[AgentInvocation] = []
+
+    def generate(self, invocation: AgentInvocation) -> AgentResponse:
+        self.invocations.append(invocation)
+        return AgentResponse(
+            content=f"Provider output from {invocation.agent_name}",
+            provider="recording",
+            model="recording-model",
+            metadata={"test": True},
         )
