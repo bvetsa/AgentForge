@@ -27,7 +27,7 @@ Workflow Runner
  |    Filesystem Tools
  |
  v
-Mock LLM Client
+Mock LLM Provider
  |
  +--> Patch Proposal Writer
  |
@@ -85,9 +85,10 @@ Detailed flow:
 3. Before each agent runs, the runner reads that agent's `allowed_tools`.
 4. The runner calls the allowed read-only tools deterministically.
 5. Tool output is formatted into `tool_context`.
-6. The mock LLM client receives the agent config plus normal state inputs and `tool_context`.
-7. Agents configured with `produces_patches: true` ask the configured patch generator for deterministic mock patch proposal artifacts.
-8. Agent outputs, trace events, tool call records, patch files, and the patch manifest are written to run artifacts.
+6. The prompt builder creates an agent invocation from the agent config, normal state inputs, and `tool_context`.
+7. The mock LLM provider receives the invocation and returns an agent response.
+8. Agents configured with `produces_patches: true` ask the configured patch generator for deterministic mock patch proposal artifacts.
+9. Agent outputs, trace events, tool call records, LLM call records, patch files, and the patch manifest are written to run artifacts.
 
 Dynamic LLM-directed tool calling and intelligent patch target selection are intentionally deferred to later phases.
 
@@ -255,7 +256,7 @@ Responsibilities:
 - Declare whether it produces patch proposal artifacts
 - Return output for its configured output key
 
-In the current implementation, agents use a mock LLM client. Future versions may call real model providers.
+In the current implementation, agents use a deterministic mock LLM provider. Future versions may call real model providers through the same provider interface.
 
 ### Workflow
 
@@ -433,9 +434,9 @@ The patch writer only writes under the run directory. It does not apply diffs, o
 
 The patch review service is independent of patch generation. It applies one selected diff only when the user runs `agentforge patch apply`, using the `target_file` stored in `patch_manifest.json`. It rejects absolute target paths, path traversal, `proposed/` targets, missing patch IDs, missing patch files, and targets that resolve outside `project_root`. It does not run tests or commit changes to Git after applying a patch.
 
-### Mock LLM Client
+### Mock LLM Provider
 
-The mock LLM client simulates LLM responses for local testing.
+The mock LLM provider simulates LLM responses for local testing.
 
 Reasons for using a mock first:
 
@@ -444,7 +445,7 @@ Reasons for using a mock first:
 - Makes tests reliable
 - Lets the engine be tested before integrating real model providers
 
-The mock client returns deterministic output that includes the agent name and input summary.
+The mock provider returns deterministic `AgentResponse` objects that include the agent name, input summary, provider name, model name, and offline metadata.
 
 ### Run Artifacts
 
@@ -461,6 +462,7 @@ input.txt
 state.json
 trace.json
 tool_calls.json
+llm_calls.json
 patch_manifest.json
 final_report.md
 ```

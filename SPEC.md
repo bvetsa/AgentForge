@@ -22,7 +22,7 @@ The product should remain local-first, artifact-driven, and explicit about file 
 
 Phase 1 implemented the YAML-driven workflow runner.
 
-Phase 2 implemented a read-only project inspection tool system. The runner can now gather deterministic project context for agents from controlled filesystem tools before calling the mock LLM client.
+Phase 2 implemented a read-only project inspection tool system. The runner can now gather deterministic project context for agents from controlled filesystem tools before calling the mock LLM provider.
 
 Phase 3 implemented patch proposal artifacts. Patch-producing agents can now emit deterministic, reviewable diff files and a run-level patch manifest.
 
@@ -52,6 +52,7 @@ Then AgentForge runs the configured agents in order, uses the current working di
   state.json
   trace.json
   tool_calls.json
+  llm_calls.json
   patch_manifest.json
   patches/
   final_report.md
@@ -129,7 +130,7 @@ Each agent reads specific keys from shared state and writes one new output key b
 - Pydantic config validation
 - Sequential workflow runner
 - Shared workflow state
-- Mock LLM client
+- Mock LLM provider
 - Trace logging
 - Read-only project inspection tools
 - Tool registry
@@ -359,6 +360,7 @@ The dev pipeline uses one run directory for the whole flow:
   state.json
   trace.json
   tool_calls.json
+  llm_calls.json
   patch_manifest.json
   patches/
   test_results.json, if tests were run
@@ -441,6 +443,16 @@ When project context is disabled, `tool_calls.json` contains:
 []
 ```
 
+## LLM Call Artifact Contract
+
+Every run writes:
+
+```text
+llm_calls.json
+```
+
+Each record includes the executed agent, invocation inputs, prompt text, response content, provider name, model name, provider metadata, output key, and timestamp.
+
 ## Patch Artifact Contract
 
 Every run writes:
@@ -504,6 +516,7 @@ input.txt
 state.json
 trace.json
 tool_calls.json
+llm_calls.json
 patch_manifest.json
 final_report.md
 ```

@@ -32,7 +32,7 @@ The roadmap prioritizes local execution, inspectable artifacts, human-approved f
 
 **Phase 7:** Implemented the planner-controlled iteration loop for `agentforge dev run`.
 
-The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially using a mock LLM client, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, writes traceable run artifacts, lets a human explicitly review and apply patch proposals, can run a safe explicit or auto-detected project test command, and can orchestrate request-to-patches-to-approval-to-tests-to-planner-decision cycles through `agentforge dev run`.
+The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially through a deterministic mock LLM provider, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, writes traceable run artifacts, lets a human explicitly review and apply patch proposals, can run a safe explicit or auto-detected project test command, and can orchestrate request-to-patches-to-approval-to-tests-to-planner-decision cycles through `agentforge dev run`.
 
 AgentForge does not have a separate debugger agent. Debugging and repair behavior comes from the planner-controlled development loop: tests fail, the testing stage writes a structured report, the planner records a deterministic decision, another implementation cycle runs if cycles remain, and user approval is required again before patches are applied. AgentForge still does not commit changes to Git, call real LLM APIs, dynamically create workflows, or let agents dynamically decide which tools to call. File modification only happens through explicit human approval: either `agentforge patch apply` for one selected patch, or `agentforge dev run --yes` / an interactive yes response for all proposed patches in each dev-run cycle.
 
@@ -215,6 +215,7 @@ input.txt
 state.json
 trace.json
 tool_calls.json
+llm_calls.json
 patch_manifest.json
 final_report.md
 ```
@@ -241,6 +242,7 @@ Artifact purposes:
 - `state.json` stores the final shared workflow state.
 - `trace.json` stores agent execution events.
 - `tool_calls.json` stores deterministic tool call records, including agent, tool, status, input, output preview, timestamp, and error when applicable.
+- `llm_calls.json` stores one provider text generation call per executed agent, including provider and model metadata.
 - `patch_manifest.json` stores the run-level list of patch proposals. It is always written and contains `[]` when no patches are proposed.
 - `final_report.md` stores the human-readable agent output report.
 - `dev_run_summary.json` stores the request, project root, workflow path, max cycles, status, per-cycle generated patches, approval status, applied patches, testing report, planner decision, final verdict or stop reason, and run-level aggregates.
