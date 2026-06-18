@@ -24,6 +24,7 @@ class ArtifactWriter:
         trace_events: list[dict[str, Any]],
         agent_outputs: list[tuple[str, str]],
         tool_calls: list[dict[str, Any]],
+        llm_calls: list[dict[str, Any]],
         patch_proposals: list[PatchProposal] | None = None,
         merge_patch_manifest: bool = False,
     ) -> Path:
@@ -36,6 +37,9 @@ class ArtifactWriter:
         self._write_json(run_directory / "state.json", state)
         self._write_json(run_directory / "trace.json", trace_events)
         self._write_json(run_directory / "tool_calls.json", tool_calls)
+        if merge_patch_manifest:
+            llm_calls = self._merge_llm_calls(run_directory, llm_calls)
+        self._write_json(run_directory / "llm_calls.json", llm_calls)
         self.patch_writer.write(run_directory, patch_proposals)
         manifest_data = [proposal.model_dump() for proposal in patch_proposals]
         if merge_patch_manifest:
@@ -79,6 +83,24 @@ class ArtifactWriter:
             if isinstance(proposal, dict) and proposal.get("id") not in proposal_ids
         ]
         return retained + patch_proposals
+
+    @staticmethod
+    def _merge_llm_calls(
+        run_directory: Path,
+        llm_calls: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        llm_calls_path = run_directory / "llm_calls.json"
+        if not llm_calls_path.exists():
+            return llm_calls
+
+        try:
+            existing = json.loads(llm_calls_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return llm_calls
+        if not isinstance(existing, list):
+            return llm_calls
+
+        return [call for call in existing if isinstance(call, dict)] + llm_calls
 
     @staticmethod
     def _write_json(path: Path, data: Any) -> None:

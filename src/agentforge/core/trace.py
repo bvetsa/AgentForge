@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from agentforge.config.schemas import AgentConfig
+from agentforge.llm import AgentInvocation, AgentResponse
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,51 @@ class ToolCallLog:
         if len(preview) > max_length:
             return f"{preview[:max_length]}..."
         return preview
+
+
+@dataclass(frozen=True)
+class LLMCallRecord:
+    """One provider text generation call made for an agent."""
+
+    agent: str
+    provider: str
+    model: str
+    input_keys: list[str]
+    output_key: str
+    inputs: dict[str, str]
+    prompt: str
+    response_content: str
+    response_metadata: dict[str, Any]
+    timestamp: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class LLMCallLog:
+    """Collect provider text generation records in execution order."""
+
+    def __init__(self) -> None:
+        self.records: list[LLMCallRecord] = []
+
+    def append(self, invocation: AgentInvocation, response: AgentResponse) -> None:
+        self.records.append(
+            LLMCallRecord(
+                agent=invocation.agent_name,
+                provider=response.provider,
+                model=response.model,
+                input_keys=list(invocation.inputs),
+                output_key=invocation.output_key,
+                inputs=dict(invocation.inputs),
+                prompt=invocation.prompt,
+                response_content=response.content,
+                response_metadata=dict(response.metadata),
+                timestamp=_utc_timestamp(),
+            )
+        )
+
+    def to_list(self) -> list[dict[str, Any]]:
+        return [record.to_dict() for record in self.records]
 
 
 def _utc_timestamp() -> str:
