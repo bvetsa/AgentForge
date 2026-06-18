@@ -148,10 +148,9 @@ class LLMCallRecord:
     model: str
     input_keys: list[str]
     output_key: str
-    inputs: dict[str, str]
-    prompt: str
-    response_content: str
-    response_metadata: dict[str, Any]
+    prompt_preview: str
+    response_preview: str
+    metadata: dict[str, Any]
     timestamp: str
 
     def to_dict(self) -> dict[str, Any]:
@@ -172,10 +171,9 @@ class LLMCallLog:
                 model=response.model,
                 input_keys=list(invocation.inputs),
                 output_key=invocation.output_key,
-                inputs=dict(invocation.inputs),
-                prompt=invocation.prompt,
-                response_content=response.content,
-                response_metadata=dict(response.metadata),
+                prompt_preview=_preview_text(invocation.prompt),
+                response_preview=_preview_text(response.content),
+                metadata=dict(response.metadata),
                 timestamp=_utc_timestamp(),
             )
         )
@@ -186,3 +184,9 @@ class LLMCallLog:
 
 def _utc_timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _preview_text(value: str, max_length: int = 500) -> str:
+    if len(value) > max_length:
+        return f"{value[:max_length]}..."
+    return value

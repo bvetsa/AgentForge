@@ -8,11 +8,12 @@ from typing import Any
 from uuid import uuid4
 
 from agentforge.core.artifacts import ArtifactWriter
+from agentforge.core.responses import AgentResponseProcessor
 from agentforge.core.state import MissingStateInputError, WorkflowState
 from agentforge.core.trace import LLMCallLog, ToolCallLog, TraceLog
 from agentforge.core.workflow import Workflow
 from agentforge.llm import AgentPromptBuilder, LLMClient, LLMProvider, MockLLMProvider
-from agentforge.patches import DeterministicPatchGenerator, PatchGenerator, PatchProposal
+from agentforge.patches import PatchGenerator, PatchProposal
 from agentforge.tools import (
     ToolError,
     ToolRegistry,
@@ -51,6 +52,7 @@ class WorkflowRunner:
         llm_provider: LLMProvider | None = None,
         llm_client: LLMClient | None = None,
         prompt_builder: AgentPromptBuilder | None = None,
+        response_processor: AgentResponseProcessor | None = None,
         patch_generator: PatchGenerator | None = None,
         runs_directory: str | Path = ".agentforge/runs",
     ) -> None:
@@ -58,7 +60,11 @@ class WorkflowRunner:
             raise ValueError("Pass either llm_provider or llm_client, not both.")
         self.llm_provider = llm_provider or llm_client or MockLLMProvider()
         self.prompt_builder = prompt_builder or AgentPromptBuilder()
-        self.patch_generator = patch_generator or DeterministicPatchGenerator()
+        if response_processor is not None and patch_generator is not None:
+            raise ValueError("Pass either response_processor or patch_generator, not both.")
+        self.response_processor = response_processor or AgentResponseProcessor(
+            patch_generator=patch_generator
+        )
         self.artifact_writer = ArtifactWriter(runs_directory)
 
     def run(
@@ -100,7 +106,13 @@ class WorkflowRunner:
                 invocation = self.prompt_builder.build(agent.config, inputs)
                 response = self.llm_provider.generate(invocation)
                 llm_call_log.append(invocation, response)
-                output = response.content
+                processed_response = self.response_processor.process(
+                    agent.config,
+                    response,
+                    patch_sequence=len(patch_proposals) + 1,
+                    patch_id_prefix=patch_id_prefix,
+                )
+                output = processed_response.content
             except MissingStateInputError as error:
                 trace_log.append_failure(agent.config, str(error))
                 run_directory = self._write_artifacts(
@@ -123,14 +135,7 @@ class WorkflowRunner:
 
             state.set_output(agent.config.output_key, output)
             agent_outputs.append((agent.config.name, output))
-            if agent.config.produces_patches:
-                proposal = self.patch_generator.create(
-                    agent.config,
-                    sequence=len(patch_proposals) + 1,
-                )
-                if patch_id_prefix:
-                    proposal = _prefix_patch_proposal(proposal, patch_id_prefix)
-                patch_proposals.append(proposal)
+            patch_proposals.extend(processed_response.patch_proposals)
             trace_log.append_success(agent.config)
 
         run_directory = self._write_artifacts(
@@ -253,13 +258,3 @@ class WorkflowRunner:
     def _create_run_id() -> str:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         return f"{timestamp}-{uuid4().hex[:8]}"
-
-
-def _prefix_patch_proposal(proposal: PatchProposal, prefix: str) -> PatchProposal:
-    patch_id = f"{prefix}{proposal.id}"
-    return proposal.model_copy(
-        update={
-            "id": patch_id,
-            "patch_file": f"patches/{patch_id}.diff",
-        }
-    )

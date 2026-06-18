@@ -26,6 +26,9 @@ class AgentResponse:
     provider: str
     model: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    patch_proposals: list[dict[str, Any]] = field(default_factory=list)
+    tool_requests: list[dict[str, Any]] = field(default_factory=list)
+    decisions: dict[str, Any] | None = None
 
 
 class LLMProvider(ABC):
