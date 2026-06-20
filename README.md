@@ -242,12 +242,12 @@ Artifact purposes:
 - `state.json` stores the final shared workflow state.
 - `trace.json` stores agent execution events.
 - `tool_calls.json` stores deterministic tool call records, including agent, tool, status, input, output preview, timestamp, and error when applicable.
-- `llm_calls.json` stores one provider text generation call per executed agent, including provider and model metadata.
+- `llm_calls.json` stores one provider text generation call per executed agent, including provider, model, metadata, input keys, output key, prompt preview, response preview, and timestamp. It does not store full raw inputs by default.
 - `patch_manifest.json` stores the run-level list of patch proposals. It is always written and contains `[]` when no patches are proposed.
 - `final_report.md` stores the human-readable agent output report.
 - `dev_run_summary.json` stores the request, project root, workflow path, max cycles, status, per-cycle generated patches, approval status, applied patches, testing report, planner decision, final verdict or stop reason, and run-level aggregates.
 
-Patch proposals begin as artifacts only. The workflow run writes readable unified-diff-like files for review, but it does not apply them or modify files in the inspected project root. A later explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command can apply one selected proposal and mark it as `applied`. Run artifacts are generated output, not source files. They should not be committed.
+Patch proposals begin as deterministic mock artifacts only. The response processor asks the patch generator to create readable unified-diff-like files for review, but it does not apply them or modify files in the inspected project root. A later explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command can apply one selected proposal and mark it as `applied`. Real LLM patch generation is deferred. Run artifacts are generated output, not source files. They should not be committed.
 
 ## Core Ideas
 

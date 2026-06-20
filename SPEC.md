@@ -451,7 +451,7 @@ Every run writes:
 llm_calls.json
 ```
 
-Each record includes the executed agent, invocation inputs, prompt text, response content, provider name, model name, provider metadata, output key, and timestamp.
+Each record includes the executed agent, input keys, output key, prompt preview, response preview, provider name, model name, provider metadata, and timestamp. Full raw inputs are not stored by default.
 
 ## Patch Artifact Contract
 
