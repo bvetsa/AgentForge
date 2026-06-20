@@ -33,7 +33,7 @@ Completed phases establish workflow execution, read-only project inspection, pat
 - Load agent YAML files
 - Validate configs with Pydantic
 - Run agents sequentially
-- Use mock LLM client
+- Use deterministic mock LLM provider
 - Maintain shared state
 - Write trace and result files
 
@@ -302,7 +302,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 
 **Features:**
 
-- Provider abstraction
+- Real provider implementations behind the existing provider abstraction
 - Mock provider retained for tests
 - OpenAI-compatible provider and/or Ollama/local provider
 - Environment-variable configuration

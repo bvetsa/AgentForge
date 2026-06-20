@@ -27,7 +27,7 @@ Workflow Runner
  |    Filesystem Tools
  |
  v
-Mock LLM Client
+Mock LLM Provider
  |
  +--> Patch Proposal Writer
  |
@@ -60,12 +60,12 @@ DevPipelineRunner
  +--> Approval Gate
  +--> Patch Review Service
  +--> TestRunner
- +--> Testing Report
- +--> Planner Decision
+ +--> TestingReportService
+ +--> PlannerDecisionService
  |      |
  |      +--> Continue to next approved cycle
  v
-Final Verdict + Dev Run Summary
+DevReportWriter + DevSummaryWriter
 ```
 
 Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution. Phase 6 added `agentforge dev run`, a human-approved end-to-end pipeline from request to patch proposals to approval to patch application to safe test execution to final verdict. Phase 7 added the planner-controlled iteration loop around that pipeline.
@@ -85,9 +85,10 @@ Detailed flow:
 3. Before each agent runs, the runner reads that agent's `allowed_tools`.
 4. The runner calls the allowed read-only tools deterministically.
 5. Tool output is formatted into `tool_context`.
-6. The mock LLM client receives the agent config plus normal state inputs and `tool_context`.
-7. Agents configured with `produces_patches: true` ask the configured patch generator for deterministic mock patch proposal artifacts.
-8. Agent outputs, trace events, tool call records, patch files, and the patch manifest are written to run artifacts.
+6. The prompt builder creates an agent invocation from the agent config, normal state inputs, and `tool_context`.
+7. The mock LLM provider receives the invocation and returns an agent response.
+8. The agent response processor extracts `response.content` and asks the configured patch generator for deterministic mock patch proposal artifacts when an agent is configured with `produces_patches: true`.
+9. Agent outputs, trace events, tool call records, preview-only LLM call records, patch files, and the patch manifest are written to run artifacts.
 
 Dynamic LLM-directed tool calling and intelligent patch target selection are intentionally deferred to later phases.
 
@@ -135,8 +136,9 @@ Phase 5 is deterministic. It does not use an LLM, start a debugger loop, apply p
 CLI -> DevPipelineRunner -> WorkflowRunner(stop before reviewer)
     -> Patch Proposals -> Approval Gate
     -> PatchReviewService -> TestRunner
-    -> Testing Report -> Planner Decision
-       -> Continue to next cycle or Final Verdict -> Dev Run Artifacts
+    -> TestingReportService -> PlannerDecisionService
+       -> Continue to next cycle or Final Verdict
+       -> DevSummaryWriter + DevReportWriter -> Dev Run Artifacts
 ```
 
 Detailed flow:
@@ -158,6 +160,8 @@ Detailed flow:
 15. Reviewer/final verdict is printed only after the planner decision returns a final outcome.
 
 The planner is the controller/orchestrator. Reviewer is not called before approval and is not used for the pre-approval change summary. There is no separate debugger agent; repair behavior comes from running another approved implementation cycle after failed tests.
+
+`DevPipelineRunner` coordinates cycle preparation, approval outcomes, patch application, test execution, and service calls. `TestingReportService` owns test-result-to-report conversion. `PlannerDecisionService` owns deterministic next-action, status, focus, and final-verdict policy. `DevSummaryWriter` owns `dev_run_summary.json` payload construction and cycle merging. `DevReportWriter` owns dev-pipeline sections appended to `final_report.md`.
 
 Agent categories:
 
@@ -226,7 +230,7 @@ Responsibilities:
 - Detect and safely run likely project test commands
 - Run the dev pipeline with per-cycle approval, testing reports, planner decisions, and final verdicts
 
-The CLI stays thin. Most logic lives in the core engine and the dedicated test execution package.
+The CLI stays thin. Most logic lives in the core engine, dev services, and the dedicated test execution package.
 
 ### Config Loader
 
@@ -255,7 +259,7 @@ Responsibilities:
 - Declare whether it produces patch proposal artifacts
 - Return output for its configured output key
 
-In the current implementation, agents use a mock LLM client. Future versions may call real model providers.
+In the current implementation, agents use a deterministic mock LLM provider. Future versions may call real model providers through the same provider interface.
 
 ### Workflow
 
@@ -433,9 +437,9 @@ The patch writer only writes under the run directory. It does not apply diffs, o
 
 The patch review service is independent of patch generation. It applies one selected diff only when the user runs `agentforge patch apply`, using the `target_file` stored in `patch_manifest.json`. It rejects absolute target paths, path traversal, `proposed/` targets, missing patch IDs, missing patch files, and targets that resolve outside `project_root`. It does not run tests or commit changes to Git after applying a patch.
 
-### Mock LLM Client
+### Mock LLM Provider
 
-The mock LLM client simulates LLM responses for local testing.
+The mock LLM provider simulates LLM responses for local testing.
 
 Reasons for using a mock first:
 
@@ -444,7 +448,7 @@ Reasons for using a mock first:
 - Makes tests reliable
 - Lets the engine be tested before integrating real model providers
 
-The mock client returns deterministic output that includes the agent name and input summary.
+The mock provider returns deterministic `AgentResponse` objects using the same response shape future providers will share. `AgentResponse` can carry future action fields, but deterministic patch artifacts are still generated by the response processor through the patch generator. Real LLM patch generation and dynamic tool calling remain deferred.
 
 ### Run Artifacts
 
@@ -461,6 +465,7 @@ input.txt
 state.json
 trace.json
 tool_calls.json
+llm_calls.json
 patch_manifest.json
 final_report.md
 ```

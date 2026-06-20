@@ -8,12 +8,12 @@ from typing import Any
 from uuid import uuid4
 
 from agentforge.core.artifacts import ArtifactWriter
+from agentforge.core.responses import AgentResponseProcessor
 from agentforge.core.state import MissingStateInputError, WorkflowState
-from agentforge.core.trace import ToolCallLog, TraceLog
+from agentforge.core.trace import LLMCallLog, ToolCallLog, TraceLog
 from agentforge.core.workflow import Workflow
-from agentforge.llm.base import LLMClient
-from agentforge.llm.mock import MockLLMClient
-from agentforge.patches import DeterministicPatchGenerator, PatchGenerator, PatchProposal
+from agentforge.llm import AgentPromptBuilder, LLMClient, LLMProvider, MockLLMProvider
+from agentforge.patches import PatchGenerator, PatchProposal
 from agentforge.tools import (
     ToolError,
     ToolRegistry,
@@ -39,6 +39,7 @@ class RunResult:
     state: dict[str, str]
     trace_events: list[dict[str, object]]
     tool_calls: list[dict[str, object]]
+    llm_calls: list[dict[str, object]]
     patch_proposals: list[dict[str, object]]
     run_directory: Path
 
@@ -48,12 +49,22 @@ class WorkflowRunner:
 
     def __init__(
         self,
+        llm_provider: LLMProvider | None = None,
         llm_client: LLMClient | None = None,
+        prompt_builder: AgentPromptBuilder | None = None,
+        response_processor: AgentResponseProcessor | None = None,
         patch_generator: PatchGenerator | None = None,
         runs_directory: str | Path = ".agentforge/runs",
     ) -> None:
-        self.llm_client = llm_client or MockLLMClient()
-        self.patch_generator = patch_generator or DeterministicPatchGenerator()
+        if llm_provider is not None and llm_client is not None:
+            raise ValueError("Pass either llm_provider or llm_client, not both.")
+        self.llm_provider = llm_provider or llm_client or MockLLMProvider()
+        self.prompt_builder = prompt_builder or AgentPromptBuilder()
+        if response_processor is not None and patch_generator is not None:
+            raise ValueError("Pass either response_processor or patch_generator, not both.")
+        self.response_processor = response_processor or AgentResponseProcessor(
+            patch_generator=patch_generator
+        )
         self.artifact_writer = ArtifactWriter(runs_directory)
 
     def run(
@@ -74,6 +85,7 @@ class WorkflowRunner:
         trace_log = TraceLog()
         tool_registry = self._create_tool_registry(project_root, use_project_context)
         tool_call_log = ToolCallLog()
+        llm_call_log = LLMCallLog()
         agent_outputs: list[tuple[str, str]] = []
         patch_proposals: list[PatchProposal] = []
         stop_names = stop_before_agent_names or set()
@@ -91,7 +103,16 @@ class WorkflowRunner:
                         tool_registry=tool_registry,
                         tool_call_log=tool_call_log,
                     )
-                output = self.llm_client.generate(agent.config, inputs)
+                invocation = self.prompt_builder.build(agent.config, inputs)
+                response = self.llm_provider.generate(invocation)
+                llm_call_log.append(invocation, response)
+                processed_response = self.response_processor.process(
+                    agent.config,
+                    response,
+                    patch_sequence=len(patch_proposals) + 1,
+                    patch_id_prefix=patch_id_prefix,
+                )
+                output = processed_response.content
             except MissingStateInputError as error:
                 trace_log.append_failure(agent.config, str(error))
                 run_directory = self._write_artifacts(
@@ -102,6 +123,7 @@ class WorkflowRunner:
                     trace_log,
                     agent_outputs,
                     tool_call_log,
+                    llm_call_log,
                     patch_proposals,
                     merge_patch_manifest=merge_patch_manifest,
                 )
@@ -113,14 +135,7 @@ class WorkflowRunner:
 
             state.set_output(agent.config.output_key, output)
             agent_outputs.append((agent.config.name, output))
-            if agent.config.produces_patches:
-                proposal = self.patch_generator.create(
-                    agent.config,
-                    sequence=len(patch_proposals) + 1,
-                )
-                if patch_id_prefix:
-                    proposal = _prefix_patch_proposal(proposal, patch_id_prefix)
-                patch_proposals.append(proposal)
+            patch_proposals.extend(processed_response.patch_proposals)
             trace_log.append_success(agent.config)
 
         run_directory = self._write_artifacts(
@@ -131,6 +146,7 @@ class WorkflowRunner:
             trace_log,
             agent_outputs,
             tool_call_log,
+            llm_call_log,
             patch_proposals,
             merge_patch_manifest=merge_patch_manifest,
         )
@@ -140,6 +156,7 @@ class WorkflowRunner:
             state=state.to_dict(),
             trace_events=trace_log.to_list(),
             tool_calls=tool_call_log.to_list(),
+            llm_calls=llm_call_log.to_list(),
             patch_proposals=[proposal.model_dump() for proposal in patch_proposals],
             run_directory=run_directory,
         )
@@ -153,6 +170,7 @@ class WorkflowRunner:
         trace_log: TraceLog,
         agent_outputs: list[tuple[str, str]],
         tool_call_log: ToolCallLog,
+        llm_call_log: LLMCallLog,
         patch_proposals: list[PatchProposal],
         merge_patch_manifest: bool = False,
     ) -> Path:
@@ -164,6 +182,7 @@ class WorkflowRunner:
             trace_events=trace_log.to_list(),
             agent_outputs=agent_outputs,
             tool_calls=tool_call_log.to_list(),
+            llm_calls=llm_call_log.to_list(),
             patch_proposals=patch_proposals,
             merge_patch_manifest=merge_patch_manifest,
         )
@@ -239,13 +258,3 @@ class WorkflowRunner:
     def _create_run_id() -> str:
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         return f"{timestamp}-{uuid4().hex[:8]}"
-
-
-def _prefix_patch_proposal(proposal: PatchProposal, prefix: str) -> PatchProposal:
-    patch_id = f"{prefix}{proposal.id}"
-    return proposal.model_copy(
-        update={
-            "id": patch_id,
-            "patch_file": f"patches/{patch_id}.diff",
-        }
-    )

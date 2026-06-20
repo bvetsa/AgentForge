@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from agentforge.config.schemas import AgentConfig
+from agentforge.llm import AgentInvocation, AgentResponse
 
 
 @dataclass(frozen=True)
@@ -138,5 +139,54 @@ class ToolCallLog:
         return preview
 
 
+@dataclass(frozen=True)
+class LLMCallRecord:
+    """One provider text generation call made for an agent."""
+
+    agent: str
+    provider: str
+    model: str
+    input_keys: list[str]
+    output_key: str
+    prompt_preview: str
+    response_preview: str
+    metadata: dict[str, Any]
+    timestamp: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+class LLMCallLog:
+    """Collect provider text generation records in execution order."""
+
+    def __init__(self) -> None:
+        self.records: list[LLMCallRecord] = []
+
+    def append(self, invocation: AgentInvocation, response: AgentResponse) -> None:
+        self.records.append(
+            LLMCallRecord(
+                agent=invocation.agent_name,
+                provider=response.provider,
+                model=response.model,
+                input_keys=list(invocation.inputs),
+                output_key=invocation.output_key,
+                prompt_preview=_preview_text(invocation.prompt),
+                response_preview=_preview_text(response.content),
+                metadata=dict(response.metadata),
+                timestamp=_utc_timestamp(),
+            )
+        )
+
+    def to_list(self) -> list[dict[str, Any]]:
+        return [record.to_dict() for record in self.records]
+
+
 def _utc_timestamp() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+
+def _preview_text(value: str, max_length: int = 500) -> str:
+    if len(value) > max_length:
+        return f"{value[:max_length]}..."
+    return value
