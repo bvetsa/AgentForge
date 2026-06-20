@@ -1,8 +1,11 @@
+import inspect
 import json
 from pathlib import Path
 
 import pytest
 
+from agentforge.config.schemas import AgentConfig
+from agentforge.core.responses import AgentResponseProcessor, ProcessedAgentResponse
 from agentforge.core.runner import WorkflowExecutionError, WorkflowRunner
 from agentforge.llm import AgentInvocation, AgentResponse, LLMProvider, MockLLMProvider
 from agentforge.patches import PatchProposal
@@ -82,9 +85,13 @@ def test_basic_workflow_run_uses_current_directory_for_project_context(
     ]
     assert all(call["provider"] == "mock" for call in saved_llm_calls)
     assert all(call["model"] == "mock-deterministic-v1" for call in saved_llm_calls)
-    assert saved_llm_calls[0]["response_content"] == result.state["plan"]
-    assert "## System Prompt" in saved_llm_calls[0]["prompt"]
-    assert "tool_context" in saved_llm_calls[0]["inputs"]
+    assert saved_llm_calls[0]["response_preview"] == result.state["plan"]
+    assert "## System Prompt" in saved_llm_calls[0]["prompt_preview"]
+    assert saved_llm_calls[0]["metadata"] == {"deterministic": True, "offline": True}
+    assert "inputs" not in saved_llm_calls[0]
+    assert "prompt" not in saved_llm_calls[0]
+    assert "response_content" not in saved_llm_calls[0]
+    assert "response_metadata" not in saved_llm_calls[0]
     assert patch_manifest == result.patch_proposals
     assert [proposal["agent_name"] for proposal in patch_manifest] == [
         "frontend",
@@ -159,7 +166,8 @@ def test_workflow_run_with_no_project_context_writes_empty_tool_calls(tmp_path: 
     llm_calls_path = result.run_directory / "llm_calls.json"
     llm_calls = json.loads(llm_calls_path.read_text(encoding="utf-8"))
     assert len(llm_calls) == 5
-    assert "tool_context" not in llm_calls[0]["inputs"]
+    assert "inputs" not in llm_calls[0]
+    assert "tool_context" not in llm_calls[0]["input_keys"]
     patch_manifest_path = result.run_directory / "patch_manifest.json"
     assert patch_manifest_path.exists()
 
@@ -181,9 +189,27 @@ def test_mock_provider_returns_agent_response() -> None:
     assert response.provider == "mock"
     assert response.model == "mock-deterministic-v1"
     assert response.metadata == {"deterministic": True, "offline": True}
+    assert response.patch_proposals == []
+    assert response.tool_requests == []
+    assert response.decisions is None
     assert response.content == (
         "Mock output from planner\n\nInputs:\n- user_request: Plan a todo endpoint"
     )
+
+
+def test_agent_response_can_carry_future_action_fields() -> None:
+    response = AgentResponse(
+        content="Ready",
+        provider="mock",
+        model="mock-deterministic-v1",
+        patch_proposals=[{"id": "future-patch"}],
+        tool_requests=[{"name": "future-tool"}],
+        decisions={"next_action": "future"},
+    )
+
+    assert response.patch_proposals == [{"id": "future-patch"}]
+    assert response.tool_requests == [{"name": "future-tool"}]
+    assert response.decisions == {"next_action": "future"}
 
 
 def test_workflow_runner_builds_agent_invocations_for_provider(tmp_path: Path) -> None:
@@ -216,6 +242,72 @@ def test_workflow_runner_builds_agent_invocations_for_provider(tmp_path: Path) -
     assert result.state["plan"] == "Provider output from planner"
     assert all(call["provider"] == "recording" for call in result.llm_calls)
     assert all(call["model"] == "recording-model" for call in result.llm_calls)
+
+
+def test_workflow_runner_delegates_response_processing(tmp_path: Path) -> None:
+    response_processor = RecordingResponseProcessor()
+    runner = WorkflowRunner(
+        llm_provider=RecordingProvider(),
+        response_processor=response_processor,
+        runs_directory=tmp_path / ".agentforge/runs",
+    )
+
+    result = runner.run(
+        PROJECT_ROOT / "examples/workflows/basic_feature.yaml",
+        "Add a todo endpoint to a FastAPI app",
+        use_project_context=False,
+    )
+
+    assert response_processor.agents == [
+        "planner",
+        "frontend",
+        "backend",
+        "testing",
+        "reviewer",
+    ]
+    assert [proposal["id"] for proposal in result.patch_proposals] == [
+        "processor-backend"
+    ]
+
+
+def test_workflow_runner_does_not_synthesize_patches_directly() -> None:
+    source = inspect.getsource(WorkflowRunner)
+
+    assert "produces_patches" not in source
+    assert "patch_generator.create" not in source
+    assert "DeterministicPatchGenerator" not in source
+
+
+def test_response_processor_creates_deterministic_patch_proposals() -> None:
+    patch_generator = CustomPatchGenerator()
+    processor = AgentResponseProcessor(patch_generator=patch_generator)
+    response = AgentResponse(
+        content="Backend output",
+        provider="mock",
+        model="mock-deterministic-v1",
+    )
+    agent_config = AgentConfig(
+        name="backend",
+        description="Builds backend changes.",
+        system_prompt="Implement backend changes.",
+        allowed_tools=[],
+        input_keys=["plan"],
+        output_key="backend_plan",
+        produces_patches=True,
+    )
+
+    processed = processor.process(
+        agent_config,
+        response,
+        patch_sequence=2,
+        patch_id_prefix="cycle1_",
+    )
+
+    assert processed.content == "Backend output"
+    assert patch_generator.sequences == [2]
+    assert len(processed.patch_proposals) == 1
+    assert processed.patch_proposals[0].id == "cycle1_custom-2"
+    assert processed.patch_proposals[0].patch_file == "patches/cycle1_custom-2.diff"
 
 
 def test_workflow_runner_accepts_an_explicit_patch_generator(tmp_path: Path) -> None:
@@ -391,4 +483,47 @@ class RecordingProvider(LLMProvider):
             provider="recording",
             model="recording-model",
             metadata={"test": True},
+        )
+
+
+class RecordingResponseProcessor(AgentResponseProcessor):
+    def __init__(self) -> None:
+        self.agents: list[str] = []
+
+    def process(
+        self,
+        agent_config: AgentConfig,
+        response: AgentResponse,
+        *,
+        patch_sequence: int,
+        patch_id_prefix: str = "",
+    ) -> ProcessedAgentResponse:
+        self.agents.append(agent_config.name)
+        patch_proposals: list[PatchProposal] = []
+        if agent_config.name == "backend":
+            patch_proposals.append(
+                PatchProposal(
+                    id="processor-backend",
+                    agent_name="backend",
+                    title="Processor patch",
+                    description="Created by the response processor.",
+                    target_file="custom/backend.txt",
+                    patch_file="patches/processor-backend.diff",
+                    status="proposed",
+                    diff="\n".join(
+                        [
+                            "diff --git a/custom/backend.txt b/custom/backend.txt",
+                            "--- a/custom/backend.txt",
+                            "+++ b/custom/backend.txt",
+                            "@@ -0,0 +1 @@",
+                            "+processor",
+                        ]
+                    ),
+                )
+            )
+        return ProcessedAgentResponse(
+            content=response.content,
+            patch_proposals=patch_proposals,
+            tool_requests=[],
+            decisions=None,
         )
