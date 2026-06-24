@@ -34,11 +34,23 @@ Phase 6 implemented the end-to-end dev pipeline. A user can run `agentforge dev 
 
 Phase 7 implemented the planner-controlled iteration loop. If tests fail and cycles remain, the testing report goes back to the planner, the planner deterministically records `continue`, another implementation cycle runs, and approval is required again before applying patches.
 
-The current scope is still intentionally limited. AgentForge does not have a separate debugger agent, commit changes to Git, integrate real LLM APIs, provide a dashboard, dynamically create workflows, perform real LLM planning, or let agents dynamically decide which tools to call. Debugging/repair behavior comes from cycling the end-to-end pipeline. File modification only happens after explicit human approval through `agentforge patch apply` or the dev pipeline approval gate.
+Phase 7b added optional real LLM provider wiring through an OpenAI-compatible chat-completions provider. The deterministic mock provider remains the default for tests, CI, and offline runs.
+
+The current scope is still intentionally limited. AgentForge does not have a separate debugger agent, commit changes to Git, provide a dashboard, dynamically create workflows, perform real LLM planning, let agents dynamically decide which tools to call, or generate real patches from LLM output. Debugging/repair behavior comes from cycling the end-to-end pipeline. File modification only happens after explicit human approval through `agentforge patch apply` or the dev pipeline approval gate.
 
 ## User Story
 
 As a developer, I can run:
+
+```bash
+agentforge config show
+agentforge config set --llm-provider openai-compatible --llm-model gpt-4.1-mini
+export AGENTFORGE_LLM_API_KEY="..."
+```
+
+Provider settings are optional. Non-secret project settings are stored in `.agentforge/config.toml`; API keys only come from `AGENTFORGE_LLM_API_KEY`. Environment variables override the project config file, and the default provider is `mock`.
+
+Then I can run:
 
 ```bash
 agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app"
@@ -131,6 +143,8 @@ Each agent reads specific keys from shared state and writes one new output key b
 - Sequential workflow runner
 - Shared workflow state
 - Mock LLM provider
+- Optional OpenAI-compatible LLM provider
+- Project-local non-secret LLM config command
 - Trace logging
 - Read-only project inspection tools
 - Tool registry
@@ -147,7 +161,6 @@ Each agent reads specific keys from shared state and writes one new output key b
 
 AgentForge currently does not include:
 
-- Real LLM API integrations
 - LangGraph
 - Dashboard
 - SDK
@@ -162,7 +175,8 @@ AgentForge currently does not include:
 - Custom agent creation UI
 - Dynamic agent-decided tool calling
 - Dynamic workflow creation
-- Real LLM planning
+- Real LLM planning policy
+- LLM-generated real patches
 
 These exclusions are intentional. The completed phases build a reliable, understandable, and safe CLI foundation before adding more powerful behavior or additional surfaces.
 
@@ -170,14 +184,13 @@ These exclusions are intentional. The completed phases build a reliable, underst
 
 Planned work should proceed in this order:
 
-1. Phase 8: Real LLM Provider Layer
-2. Phase 9: Dynamic Agent-Decided Tool Calling
-3. Phase 10: Custom Agents and Workflows
-4. Phase 11: CLI Cleanup and UX Polish
-5. Phase 12: Python SDK
-6. Phase 13: Dashboard
+1. Phase 8: Dynamic Agent-Decided Tool Calling
+2. Phase 9: Custom Agents and Workflows
+3. Phase 10: CLI Cleanup and UX Polish
+4. Phase 11: Python SDK
+5. Phase 12: Dashboard
 
-Phases 8-11 continue the CLI and core engine work. The SDK and dashboard should come after the CLI product is stable.
+Phases 8-10 continue the CLI and core engine work. The SDK and dashboard should come after the CLI product is stable.
 
 ## Core Objects
 
@@ -497,7 +510,7 @@ The manifest is part of the run artifact contract and supports the Phase 4 revie
 - Dev pipeline tests must still use safe Phase 5 test execution.
 - Dev pipeline must not call reviewer before approval.
 - Dev pipeline repair behavior must come from planner-controlled cycles, not a separate debugger agent.
-- Real LLM planner reasoning, dynamic workflow creation, and dynamic tool calling are not implemented.
+- Real LLM planner policy, LLM-generated patches, dynamic workflow creation, and dynamic tool calling are not implemented.
 - Project source files must not be modified by patch proposal generation.
 - Generated run artifacts under `.agentforge/runs/` are not source files and should not be committed.
 

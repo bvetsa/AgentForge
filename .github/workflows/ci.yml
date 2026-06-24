@@ -28,6 +28,13 @@ jobs:
       - name: Run lint
         run: ruff check .
 
+      - name: Run config smoke test
+        run: |
+          agentforge config show
+          agentforge config set --llm-provider mock --llm-model ci-mock --llm-timeout 5
+          agentforge config show
+          agentforge config reset
+
       - name: Run CLI smoke test
         run: agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint to a FastAPI app" --no-project-context
 

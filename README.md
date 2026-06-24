@@ -30,11 +30,11 @@ The roadmap prioritizes local execution, inspectable artifacts, human-approved f
 
 **Phase 6:** Implemented the end-to-end dev pipeline command.
 
-**Phase 7:** Implemented the planner-controlled iteration loop for `agentforge dev run`.
+**Phase 7:** Implemented the planner-controlled iteration loop for `agentforge dev run` and optional OpenAI-compatible provider wiring.
 
-The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially through a deterministic mock LLM provider, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, writes traceable run artifacts, lets a human explicitly review and apply patch proposals, can run a safe explicit or auto-detected project test command, and can orchestrate request-to-patches-to-approval-to-tests-to-planner-decision cycles through `agentforge dev run`.
+The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially through a provider-shaped LLM interface that defaults to a deterministic mock provider, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, writes traceable run artifacts, lets a human explicitly review and apply patch proposals, can run a safe explicit or auto-detected project test command, and can orchestrate request-to-patches-to-approval-to-tests-to-planner-decision cycles through `agentforge dev run`.
 
-AgentForge does not have a separate debugger agent. Debugging and repair behavior comes from the planner-controlled development loop: tests fail, the testing stage writes a structured report, the planner records a deterministic decision, another implementation cycle runs if cycles remain, and user approval is required again before patches are applied. AgentForge still does not commit changes to Git, call real LLM APIs, dynamically create workflows, or let agents dynamically decide which tools to call. File modification only happens through explicit human approval: either `agentforge patch apply` for one selected patch, or `agentforge dev run --yes` / an interactive yes response for all proposed patches in each dev-run cycle.
+AgentForge does not have a separate debugger agent. Debugging and repair behavior comes from the planner-controlled development loop: tests fail, the testing stage writes a structured report, the planner records a deterministic decision, another implementation cycle runs if cycles remain, and user approval is required again before patches are applied. AgentForge still does not commit changes to Git, dynamically create workflows, let agents dynamically decide which tools to call, or generate real code patches from LLM output. File modification only happens through explicit human approval: either `agentforge patch apply` for one selected patch, or `agentforge dev run --yes` / an interactive yes response for all proposed patches in each dev-run cycle.
 
 ## Local Setup
 
@@ -57,6 +57,50 @@ CI also runs a Phase 5 test execution smoke test against `examples/sample_projec
 CI also runs a dev pipeline smoke test against a temporary copy of `examples/sample_project` so approved patch application does not leave tracked files modified.
 
 ## CLI Usage
+
+### LLM Provider Configuration
+
+The mock provider is the default for normal runs, tests, CI, and offline use. Real LLM calls are optional and are configured separately from `agentforge run` and `agentforge dev run`.
+
+Project-local non-secret settings live in `.agentforge/config.toml`:
+
+```bash
+agentforge config show
+agentforge config set --llm-provider openai-compatible
+agentforge config set --llm-model gpt-4.1-mini
+agentforge config set --llm-base-url https://api.openai.com/v1
+agentforge config set --llm-timeout 30
+agentforge config reset
+```
+
+The API key is never stored in `.agentforge/config.toml`; set it only through the environment:
+
+```bash
+export AGENTFORGE_LLM_API_KEY="..."
+```
+
+Environment variables override `.agentforge/config.toml`, which overrides defaults:
+
+```text
+AGENTFORGE_LLM_PROVIDER
+AGENTFORGE_LLM_MODEL
+AGENTFORGE_LLM_API_KEY
+AGENTFORGE_LLM_BASE_URL
+AGENTFORGE_LLM_TIMEOUT_SECONDS
+```
+
+Example OpenAI-compatible setup:
+
+```bash
+agentforge config set --llm-provider openai-compatible --llm-model gpt-4.1-mini
+export AGENTFORGE_LLM_API_KEY="..."
+agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoint"
+agentforge dev run --project-root examples/sample_project --input "Add a todo endpoint" --yes --max-cycles 1
+```
+
+This is provider integration only. Dynamic tool calling and LLM-generated real patches are not implemented yet; patch proposals still come from the deterministic patch generator and require explicit approval before application.
+
+### Workflow Runs
 
 Run a workflow with the current working directory as project context:
 
@@ -107,7 +151,7 @@ Agent categories documented for the dev pipeline:
 - Coding agents: `frontend`, `backend`
 - Post-coding agents: `testing`
 
-Phase 7 implements the loop architecture with deterministic/mock planner policy only. Real LLM planner reasoning, dynamic workflow creation, dynamic tool calling, Git commits, SDK, dashboard, and Docker are not implemented.
+Phase 7 implements the loop architecture with deterministic planner policy only. Real LLM planner policy, dynamic workflow creation, dynamic tool calling, LLM-generated patches, Git commits, SDK, dashboard, and Docker are not implemented.
 
 ## Patch Review and Application
 
@@ -374,7 +418,7 @@ AgentForge will eventually support three product surfaces, in this order:
 2. Python SDK
 3. Local dashboard
 
-The remaining roadmap keeps the next phases focused on real LLM provider support, dynamic tool calling, custom agent/workflow management, and CLI UX polish. The Python SDK and dashboard come after the CLI product is stable.
+The remaining roadmap keeps the next phases focused on dynamic tool calling, custom agent/workflow management, and CLI UX polish. The Python SDK and dashboard come after the CLI product is stable.
 
 ## Documentation
 

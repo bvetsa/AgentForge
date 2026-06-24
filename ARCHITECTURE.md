@@ -27,7 +27,11 @@ Workflow Runner
  |    Filesystem Tools
  |
  v
-Mock LLM Provider
+LLM Provider Layer
+ |
+ +--> Mock Provider
+ |
+ +--> OpenAI-compatible Provider
  |
  +--> Patch Proposal Writer
  |
@@ -68,9 +72,9 @@ DevPipelineRunner
 DevReportWriter + DevSummaryWriter
 ```
 
-Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution. Phase 6 added `agentforge dev run`, a human-approved end-to-end pipeline from request to patch proposals to approval to patch application to safe test execution to final verdict. Phase 7 added the planner-controlled iteration loop around that pipeline.
+Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution. Phase 6 added `agentforge dev run`, a human-approved end-to-end pipeline from request to patch proposals to approval to patch application to safe test execution to final verdict. Phase 7 added the planner-controlled iteration loop around that pipeline. Phase 7b added optional OpenAI-compatible provider wiring while keeping the deterministic mock provider as the default.
 
-AgentForge does not implement a separate debugger agent, call real LLM APIs, dynamically create workflows, commit changes to Git, or let agents dynamically choose tools. Debugging and repair behavior comes from cycling the end-to-end dev pipeline under planner control. Source modification requires human approval through `agentforge patch apply` or the dev pipeline approval gate in every cycle.
+AgentForge does not implement a separate debugger agent, dynamically create workflows, commit changes to Git, let agents dynamically choose tools, or generate real patches from LLM output. Debugging and repair behavior comes from cycling the end-to-end dev pipeline under planner control. Source modification requires human approval through `agentforge patch apply` or the dev pipeline approval gate in every cycle.
 
 ## Phase 2 Tool Flow
 
@@ -86,7 +90,7 @@ Detailed flow:
 4. The runner calls the allowed read-only tools deterministically.
 5. Tool output is formatted into `tool_context`.
 6. The prompt builder creates an agent invocation from the agent config, normal state inputs, and `tool_context`.
-7. The mock LLM provider receives the invocation and returns an agent response.
+7. The configured LLM provider receives the invocation and returns an agent response.
 8. The agent response processor extracts `response.content` and asks the configured patch generator for deterministic mock patch proposal artifacts when an agent is configured with `produces_patches: true`.
 9. Agent outputs, trace events, tool call records, preview-only LLM call records, patch files, and the patch manifest are written to run artifacts.
 
@@ -169,7 +173,7 @@ Agent categories:
 - Coding agents: `frontend`, `backend`
 - Post-coding agents: `testing`
 
-Phase 7 intentionally uses deterministic/mock planner decisions. Real LLM planner reasoning, dynamic workflow creation, dynamic agent-decided tool calling, Git commits, SDK, dashboard, and Docker are not implemented.
+Phase 7 intentionally uses deterministic planner decisions for dev-loop control. Real LLM planner policy, dynamic workflow creation, dynamic agent-decided tool calling, Git commits, SDK, dashboard, and Docker are not implemented.
 
 ## Components
 
@@ -222,6 +226,8 @@ Responsibilities:
 - Parse command-line arguments
 - Receive user input
 - Validate mutually exclusive project context flags
+- Load non-secret LLM config and environment overrides
+- Create the configured LLM provider
 - Invoke the workflow runner
 - Print the run directory and final status
 - List patch proposal metadata for a previous run
@@ -259,7 +265,7 @@ Responsibilities:
 - Declare whether it produces patch proposal artifacts
 - Return output for its configured output key
 
-In the current implementation, agents use a deterministic mock LLM provider. Future versions may call real model providers through the same provider interface.
+Agents use the provider interface. The default provider is deterministic mock; an optional OpenAI-compatible provider can be selected by CLI config and environment variables.
 
 ### Workflow
 
@@ -437,7 +443,22 @@ The patch writer only writes under the run directory. It does not apply diffs, o
 
 The patch review service is independent of patch generation. It applies one selected diff only when the user runs `agentforge patch apply`, using the `target_file` stored in `patch_manifest.json`. It rejects absolute target paths, path traversal, `proposed/` targets, missing patch IDs, missing patch files, and targets that resolve outside `project_root`. It does not run tests or commit changes to Git after applying a patch.
 
-### Mock LLM Provider
+### LLM Provider Layer
+
+The LLM provider layer receives `AgentInvocation` objects and returns `AgentResponse` objects. `WorkflowRunner` depends only on that interface; provider selection, TOML config, environment variables, API keys, and OpenAI-compatible HTTP behavior live outside the runner.
+
+Current providers:
+
+- `mock` - deterministic and offline; default for tests, CI, and normal runs.
+- `openai-compatible` - optional chat-completions-compatible HTTP provider.
+
+Project-local non-secret settings are stored in `.agentforge/config.toml` through `agentforge config`. API keys are never written there and must come from `AGENTFORGE_LLM_API_KEY`.
+
+Config priority:
+
+1. Environment variables
+2. `.agentforge/config.toml`
+3. Defaults
 
 The mock LLM provider simulates LLM responses for local testing.
 
@@ -448,7 +469,7 @@ Reasons for using a mock first:
 - Makes tests reliable
 - Lets the engine be tested before integrating real model providers
 
-The mock provider returns deterministic `AgentResponse` objects using the same response shape future providers will share. `AgentResponse` can carry future action fields, but deterministic patch artifacts are still generated by the response processor through the patch generator. Real LLM patch generation and dynamic tool calling remain deferred.
+The mock provider returns deterministic `AgentResponse` objects using the same response shape real providers share. `AgentResponse` can carry future action fields, but deterministic patch artifacts are still generated by the response processor through the patch generator. Real LLM patch generation and dynamic tool calling remain deferred.
 
 ### Run Artifacts
 
@@ -554,17 +575,9 @@ Phase 5 does not include patch application or planner-controlled repair cycles.
 
 Phase 7 uses failed test output to build a structured testing report, then records a deterministic planner decision. If tests fail and cycles remain, the planner selects `continue`, records a simple focus such as `implementation`, and the dev pipeline starts another workflow/coding cycle in the same run directory. There is no separate debugger agent. Humans still approve every cycle unless `--yes` is used.
 
-### LLM Provider Layer
+### Future LLM Provider Extensions
 
-Abstracts model providers.
-
-Possible providers:
-
-- OpenAI-compatible APIs
-- Local Ollama
-- Other local providers
-
-The provider layer should allow users to bring their own API keys through environment variables. Secrets should not be hardcoded. The mock provider should remain available for deterministic tests.
+The provider layer can grow to support more provider types, such as local Ollama-compatible services or other local providers. New providers should keep secrets in environment variables, return the shared `AgentResponse` shape, avoid writing secrets to artifacts, and leave `WorkflowRunner` and `DevPipelineRunner` free of provider-specific logic.
 
 ### Dynamic Tool Calling
 

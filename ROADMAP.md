@@ -294,27 +294,37 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - No dynamic workflow creation.
 - No dynamic tool calling.
 
-## Phase 8: Real LLM Provider Layer
+## Phase 7b: Real LLM Provider MVP
 
 **Goal:** Add real model providers without losing deterministic tests.
 
-**Status:** Planned.
+**Status:** Implemented.
 
-**Features:**
+**Implemented features:**
 
-- Real provider implementations behind the existing provider abstraction
-- Mock provider retained for tests
-- OpenAI-compatible provider and/or Ollama/local provider
-- Environment-variable configuration
-- `.env.example`
+- `agentforge config show`
+- `agentforge config set --llm-provider ...`
+- `agentforge config set --llm-model ...`
+- `agentforge config set --llm-base-url ...`
+- `agentforge config set --llm-timeout ...`
+- `agentforge config reset`
+- Project-local `.agentforge/config.toml` for non-secret provider settings
+- Environment variable overrides
+- `AGENTFORGE_LLM_API_KEY` as the only API key source
+- Real provider implementation behind the existing provider abstraction
+- OpenAI-compatible chat-completions provider
+- Mock provider retained as the default for tests, CI, and offline runs
 
 **Important constraints:**
 
 - Do not hardcode secrets.
+- Do not write API keys to project config or artifacts.
 - Keep provider behavior observable in artifacts where useful.
 - Preserve reliable tests through the mock provider.
+- Do not add dynamic tool calling.
+- Do not add LLM-generated patches.
 
-## Phase 9: Dynamic Agent-Decided Tool Calling
+## Phase 8: Dynamic Agent-Decided Tool Calling
 
 **Goal:** Allow agents to request tools during execution while preserving tool permissions and observability.
 
@@ -336,7 +346,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Keep read/write boundaries explicit.
 - Do not let dynamic tool calling bypass configured permissions.
 
-## Phase 10: Custom Agents and Workflows
+## Phase 9: Custom Agents and Workflows
 
 **Goal:** Improve CLI support for creating, validating, discovering, and organizing agent and workflow configs.
 
@@ -350,7 +360,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Templates for new agents and workflows
 - Local config registry if appropriate
 
-## Phase 11: CLI Cleanup and UX Polish
+## Phase 10: CLI Cleanup and UX Polish
 
 **Goal:** Make the command-line product complete, coherent, and pleasant to use before adding other surfaces.
 
@@ -366,7 +376,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - `--json` mode where appropriate
 - `--verbose` mode where appropriate
 
-## Phase 12: Python SDK
+## Phase 11: Python SDK
 
 **Goal:** Expose the stable engine through a Python API after the CLI product is complete.
 
@@ -384,7 +394,7 @@ print(result.final_report)
 
 The SDK should expose the core workflow engine without requiring the CLI.
 
-## Phase 13: Dashboard
+## Phase 12: Dashboard
 
 **Goal:** Add a visual interface after the CLI and SDK foundations are stable.
 
