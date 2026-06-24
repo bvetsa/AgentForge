@@ -12,7 +12,13 @@ from agentforge.core.responses import AgentResponseProcessor
 from agentforge.core.state import MissingStateInputError, WorkflowState
 from agentforge.core.trace import LLMCallLog, ToolCallLog, TraceLog
 from agentforge.core.workflow import Workflow
-from agentforge.llm import AgentPromptBuilder, LLMClient, LLMProvider, MockLLMProvider
+from agentforge.llm import (
+    AgentPromptBuilder,
+    LLMClient,
+    LLMProvider,
+    LLMProviderError,
+    MockLLMProvider,
+)
 from agentforge.patches import PatchGenerator, PatchProposal
 from agentforge.tools import (
     ToolError,
@@ -113,7 +119,7 @@ class WorkflowRunner:
                     patch_id_prefix=patch_id_prefix,
                 )
                 output = processed_response.content
-            except MissingStateInputError as error:
+            except (MissingStateInputError, LLMProviderError) as error:
                 trace_log.append_failure(agent.config, str(error))
                 run_directory = self._write_artifacts(
                     run_id,

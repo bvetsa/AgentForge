@@ -8,13 +8,25 @@ import typer
 from agentforge.config.loader import ConfigLoadError
 from agentforge.core.runner import WorkflowExecutionError, WorkflowRunner
 from agentforge.dev import DevPipelineError, DevPipelineRunner, DevRunResult, DevRunSession
+from agentforge.llm import (
+    LLMConfigError,
+    LLMProvider,
+    create_llm_provider,
+    load_llm_provider_config,
+    non_secret_config_dict,
+    reset_project_llm_config,
+    set_project_llm_config,
+)
+from agentforge.llm.config import parse_timeout_seconds, validate_provider_name
 from agentforge.patches import PatchReviewError, PatchReviewService
 from agentforge.testing import DEFAULT_TEST_TIMEOUT_SECONDS, TestRunError, TestRunner
 
 app = typer.Typer(help="Run composable software-development agent workflows.")
+config_app = typer.Typer(help="Manage project AgentForge configuration.")
 patch_app = typer.Typer(help="Review and apply patch proposals from a previous run.")
 test_app = typer.Typer(help="Detect and run project test commands.")
 dev_app = typer.Typer(help="Run the human-approved end-to-end development pipeline.")
+app.add_typer(config_app, name="config")
 app.add_typer(patch_app, name="patch")
 app.add_typer(test_app, name="test")
 app.add_typer(dev_app, name="dev")
@@ -55,18 +67,90 @@ def run(
         raise typer.Exit(code=1)
 
     try:
-        result = WorkflowRunner().run(
+        llm_provider = _create_configured_llm_provider()
+        result = WorkflowRunner(llm_provider=llm_provider).run(
             workflow_path,
             input_text,
             project_root=project_root,
             use_project_context=not no_project_context,
         )
-    except (ConfigLoadError, WorkflowExecutionError) as error:
+    except (ConfigLoadError, LLMConfigError, WorkflowExecutionError) as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(code=1) from error
 
     typer.echo(f"Workflow '{result.workflow_name}' completed successfully.")
     typer.echo(f"Run artifacts: {result.run_directory}")
+
+
+@config_app.command("show")
+def show_config() -> None:
+    """Show effective non-secret AgentForge configuration."""
+    try:
+        config = load_llm_provider_config()
+    except LLMConfigError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+    for key, value in non_secret_config_dict(config).items():
+        if value is None:
+            value = "null"
+        typer.echo(f"{key}: {value}")
+
+
+@config_app.command("set")
+def set_config(
+    llm_provider: Annotated[
+        str | None,
+        typer.Option("--llm-provider", help="LLM provider name."),
+    ] = None,
+    llm_model: Annotated[
+        str | None,
+        typer.Option("--llm-model", help="LLM model name."),
+    ] = None,
+    llm_base_url: Annotated[
+        str | None,
+        typer.Option("--llm-base-url", help="Chat-completions-compatible base URL."),
+    ] = None,
+    llm_timeout: Annotated[
+        str | None,
+        typer.Option("--llm-timeout", help="LLM request timeout in seconds."),
+    ] = None,
+) -> None:
+    """Set project-local non-secret LLM configuration values."""
+    updates: dict[str, object] = {}
+    try:
+        if llm_provider is not None:
+            updates["provider"] = validate_provider_name(
+                llm_provider,
+                source="--llm-provider",
+            )
+        if llm_model is not None:
+            updates["model"] = llm_model
+        if llm_base_url is not None:
+            updates["base_url"] = llm_base_url
+        if llm_timeout is not None:
+            updates["timeout_seconds"] = parse_timeout_seconds(
+                llm_timeout,
+                source="--llm-timeout",
+            )
+        if not updates:
+            raise LLMConfigError("Provide at least one config value to set.")
+        config_path = set_project_llm_config(updates)
+    except LLMConfigError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(code=1) from error
+
+    typer.echo(f"Wrote {config_path}")
+
+
+@config_app.command("reset")
+def reset_config() -> None:
+    """Remove project-local AgentForge configuration."""
+    removed = reset_project_llm_config()
+    if removed:
+        typer.echo("Removed .agentforge/config.toml")
+    else:
+        typer.echo("No project config file found.")
 
 
 @patch_app.command("list")
@@ -284,17 +368,20 @@ def run_dev_pipeline(
     resolved_workflow_path = _resolve_workflow_path(workflow_path)
 
     try:
-        pipeline = DevPipelineRunner()
+        llm_provider = _create_configured_llm_provider()
+        workflow_runner = WorkflowRunner(llm_provider=llm_provider)
+        pipeline = DevPipelineRunner(workflow_runner=workflow_runner)
         session = pipeline.prepare(
             user_request=input_text,
             project_root=resolved_project_root,
             workflow_path=resolved_workflow_path,
             max_cycles=max_cycles,
         )
-    except DevPipelineError as error:
+    except (LLMConfigError, DevPipelineError) as error:
         typer.echo(f"Error: {error}", err=True)
-        if error.run_directory is not None:
-            typer.echo(f"Run artifacts: {error.run_directory}", err=True)
+        run_directory = getattr(error, "run_directory", None)
+        if run_directory is not None:
+            typer.echo(f"Run artifacts: {run_directory}", err=True)
         raise typer.Exit(code=1) from error
 
     while True:
@@ -334,6 +421,11 @@ def run_dev_pipeline(
             if error.run_directory is not None:
                 typer.echo(f"Run artifacts: {error.run_directory}", err=True)
             raise typer.Exit(code=1) from error
+
+
+def _create_configured_llm_provider() -> LLMProvider:
+    config = load_llm_provider_config()
+    return create_llm_provider(config)
 
 
 def _exit_with_error(error: PatchReviewError) -> None:

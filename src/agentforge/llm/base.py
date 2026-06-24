@@ -5,6 +5,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+class LLMError(RuntimeError):
+    """Base class for AgentForge LLM configuration and provider errors."""
+
+
+class LLMProviderError(LLMError):
+    """Raised when an LLM provider cannot complete a generation request."""
+
+
 @dataclass(frozen=True)
 class AgentInvocation:
     """Provider-ready request for one agent text generation step."""
