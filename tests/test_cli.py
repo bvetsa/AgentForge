@@ -28,6 +28,9 @@ def test_cli_run_command_writes_artifacts(tmp_path: Path, monkeypatch) -> None:
     assert len(run_directories) == 1
     tool_calls = json.loads((run_directories[0] / "tool_calls.json").read_text(encoding="utf-8"))
     assert tool_calls
+    llm_calls = json.loads((run_directories[0] / "llm_calls.json").read_text(encoding="utf-8"))
+    assert all(call["provider"] == "mock" for call in llm_calls)
+    assert all(call["model"] == "mock-deterministic-v1" for call in llm_calls)
 
 
 def test_cli_run_command_records_tool_calls_for_project_root(

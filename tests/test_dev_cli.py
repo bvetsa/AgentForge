@@ -32,6 +32,9 @@ def test_dev_run_creates_run_directory_and_summary(
     assert result.exit_code == 0, result.output
     run_directory = single_run_directory(tmp_path)
     assert (run_directory / "dev_run_summary.json").exists()
+    llm_calls = json.loads((run_directory / "llm_calls.json").read_text(encoding="utf-8"))
+    assert all(call["provider"] == "mock" for call in llm_calls)
+    assert all(call["model"] == "mock-deterministic-v1" for call in llm_calls)
 
 
 def test_dev_run_defaults_project_root_to_current_working_directory(

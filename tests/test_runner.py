@@ -1,13 +1,21 @@
 import inspect
 import json
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from agentforge.config.schemas import AgentConfig
 from agentforge.core.responses import AgentResponseProcessor, ProcessedAgentResponse
 from agentforge.core.runner import WorkflowExecutionError, WorkflowRunner
-from agentforge.llm import AgentInvocation, AgentResponse, LLMProvider, MockLLMProvider
+from agentforge.llm import (
+    AgentInvocation,
+    AgentResponse,
+    LLMProvider,
+    MockLLMProvider,
+    OpenAICompatibleProvider,
+)
 from agentforge.patches import PatchProposal
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -379,6 +387,39 @@ agents:
     assert json.loads(llm_calls_path.read_text(encoding="utf-8")) == []
 
 
+def test_provider_errors_write_sanitized_workflow_artifacts(tmp_path: Path) -> None:
+    provider = OpenAICompatibleProvider(
+        api_key="sk-runner-secret",
+        model="request-model",
+        transport=SecretFailingTransport(),
+    )
+    runner = WorkflowRunner(
+        llm_provider=provider,
+        runs_directory=tmp_path / ".agentforge/runs",
+    )
+
+    with pytest.raises(WorkflowExecutionError) as error:
+        runner.run(
+            PROJECT_ROOT / "examples/workflows/basic_feature.yaml",
+            "Add a todo endpoint",
+            use_project_context=False,
+        )
+
+    assert "sk-runner-secret" not in str(error.value)
+    assert error.value.run_directory is not None
+    trace_text = (error.value.run_directory / "trace.json").read_text(encoding="utf-8")
+    llm_calls_text = (error.value.run_directory / "llm_calls.json").read_text(
+        encoding="utf-8"
+    )
+    final_report = (error.value.run_directory / "final_report.md").read_text(
+        encoding="utf-8"
+    )
+    assert "sk-runner-secret" not in trace_text
+    assert "sk-runner-secret" not in llm_calls_text
+    assert "sk-runner-secret" not in final_report
+    assert "[REDACTED]" in trace_text
+
+
 def test_patch_manifest_contains_empty_list_when_no_patches_are_generated(tmp_path: Path) -> None:
     agent_path = tmp_path / "planner.yaml"
     agent_path.write_text(
@@ -527,3 +568,14 @@ class RecordingResponseProcessor(AgentResponseProcessor):
             tool_requests=[],
             decisions=None,
         )
+
+
+class SecretFailingTransport:
+    def __call__(
+        self,
+        _url: str,
+        _headers: Mapping[str, str],
+        _payload: Mapping[str, Any],
+        _timeout_seconds: float,
+    ) -> Mapping[str, Any]:
+        raise RuntimeError("provider echoed Authorization: Bearer sk-runner-secret")
