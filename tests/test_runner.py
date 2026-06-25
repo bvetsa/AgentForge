@@ -286,7 +286,7 @@ def test_workflow_runner_does_not_synthesize_patches_directly() -> None:
     assert "DeterministicPatchGenerator" not in source
 
 
-def test_response_processor_creates_deterministic_patch_proposals() -> None:
+def test_response_processor_falls_back_to_deterministic_patches_for_mock_response() -> None:
     patch_generator = CustomPatchGenerator()
     processor = AgentResponseProcessor(patch_generator=patch_generator)
     response = AgentResponse(
@@ -316,6 +316,73 @@ def test_response_processor_creates_deterministic_patch_proposals() -> None:
     assert len(processed.patch_proposals) == 1
     assert processed.patch_proposals[0].id == "cycle1_custom-2"
     assert processed.patch_proposals[0].patch_file == "patches/cycle1_custom-2.diff"
+
+
+def test_response_processor_uses_parsed_llm_patches_for_real_provider() -> None:
+    patch_generator = CustomPatchGenerator()
+    processor = AgentResponseProcessor(patch_generator=patch_generator)
+    response = AgentResponse(
+        content=_llm_patch_content("src/app.py", "Add health endpoint"),
+        provider="openai-compatible",
+        model="qwen2.5-coder:1.5b",
+    )
+
+    processed = processor.process(
+        _patch_agent_config(),
+        response,
+        patch_sequence=2,
+    )
+
+    assert patch_generator.sequences == []
+    assert len(processed.patch_proposals) == 1
+    proposal = processed.patch_proposals[0]
+    assert proposal.id == "002-backend"
+    assert proposal.patch_file == "patches/002-backend.diff"
+    assert proposal.title == "Add health endpoint"
+    assert proposal.target_file == "src/app.py"
+    assert "diff --git a/src/app.py b/src/app.py" in proposal.diff
+
+
+def test_response_processor_returns_no_patches_for_real_provider_without_patch_block() -> None:
+    patch_generator = CustomPatchGenerator()
+    processor = AgentResponseProcessor(patch_generator=patch_generator)
+    response = AgentResponse(
+        content="Backend implementation plan without a structured patch artifact.",
+        provider="openai-compatible",
+        model="qwen2.5-coder:1.5b",
+    )
+
+    processed = processor.process(
+        _patch_agent_config(),
+        response,
+        patch_sequence=2,
+    )
+
+    assert processed.patch_proposals == []
+    assert patch_generator.sequences == []
+
+
+def test_response_processor_prefixes_parsed_llm_patch_ids() -> None:
+    processor = AgentResponseProcessor()
+    response = AgentResponse(
+        content=_llm_patch_content("src/app.py", "Add health endpoint"),
+        provider="openai-compatible",
+        model="qwen2.5-coder:1.5b",
+    )
+
+    processed = processor.process(
+        _patch_agent_config(),
+        response,
+        patch_sequence=2,
+        patch_id_prefix="cycle1_",
+    )
+
+    assert [proposal.id for proposal in processed.patch_proposals] == [
+        "cycle1_002-backend"
+    ]
+    assert [proposal.patch_file for proposal in processed.patch_proposals] == [
+        "patches/cycle1_002-backend.diff"
+    ]
 
 
 def test_workflow_runner_accepts_an_explicit_patch_generator(tmp_path: Path) -> None:
@@ -511,6 +578,38 @@ class CustomPatchGenerator:
             status="proposed",
             diff=diff,
         )
+
+
+def _patch_agent_config() -> AgentConfig:
+    return AgentConfig(
+        name="backend",
+        description="Builds backend changes.",
+        system_prompt="Implement backend changes.",
+        allowed_tools=[],
+        input_keys=["plan"],
+        output_key="backend_plan",
+        produces_patches=True,
+    )
+
+
+def _llm_patch_content(target_file: str, title: str) -> str:
+    return f"""
+Backend implementation plan.
+
+```agentforge-patch
+target_file: {target_file}
+title: {title}
+description: Adds a GET /health endpoint.
+---BEGIN DIFF---
+diff --git a/{target_file} b/{target_file}
+--- a/{target_file}
++++ b/{target_file}
+@@ -1,3 +1,7 @@
++def health():
++    return {{"status": "ok"}}
+---END DIFF---
+```
+""".strip()
 
 
 class RecordingProvider(LLMProvider):
