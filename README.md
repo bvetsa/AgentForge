@@ -32,9 +32,11 @@ The roadmap prioritizes local execution, inspectable artifacts, human-approved f
 
 **Phase 7:** Implemented the planner-controlled iteration loop for `agentforge dev run` and optional OpenAI-compatible provider wiring.
 
+**Phase 8:** Implemented structured LLM patch proposal parsing for real providers.
+
 The current implementation is a CLI tool that loads YAML-defined agents and workflows, runs agents sequentially through a provider-shaped LLM interface that defaults to a deterministic mock provider, passes structured shared state between agents, gathers deterministic read-only project context from configured tools, writes traceable run artifacts, lets a human explicitly review and apply patch proposals, can run a safe explicit or auto-detected project test command, and can orchestrate request-to-patches-to-approval-to-tests-to-planner-decision cycles through `agentforge dev run`.
 
-AgentForge does not have a separate debugger agent. Debugging and repair behavior comes from the planner-controlled development loop: tests fail, the testing stage writes a structured report, the planner records a deterministic decision, another implementation cycle runs if cycles remain, and user approval is required again before patches are applied. AgentForge still does not commit changes to Git, dynamically create workflows, let agents dynamically decide which tools to call, or generate real code patches from LLM output. File modification only happens through explicit human approval: either `agentforge patch apply` for one selected patch, or `agentforge dev run --yes` / an interactive yes response for all proposed patches in each dev-run cycle.
+AgentForge does not have a separate debugger agent. Debugging and repair behavior comes from the planner-controlled development loop: tests fail, the testing stage writes a structured report, the planner records a deterministic decision, another implementation cycle runs if cycles remain, and user approval is required again before patches are applied. AgentForge still does not commit changes to Git, dynamically create workflows, or let agents dynamically decide which tools to call. File modification only happens through explicit human approval: either `agentforge patch apply` for one selected patch, or `agentforge dev run --yes` / an interactive yes response for all proposed patches in each dev-run cycle. Real providers can propose patch artifacts, but they cannot directly write files.
 
 ## Local Setup
 
@@ -98,7 +100,23 @@ agentforge run examples/workflows/basic_feature.yaml --input "Add a todo endpoin
 agentforge dev run --project-root examples/sample_project --input "Add a todo endpoint" --yes --max-cycles 1
 ```
 
-This is provider integration only. Dynamic tool calling and LLM-generated real patches are not implemented yet; patch proposals still come from the deterministic patch generator and require explicit approval before application.
+Mock-provider patch proposals still come from the deterministic patch generator. Real providers must emit `agentforge-patch` fenced blocks for changes to become patch artifacts. Dynamic tool calling is not implemented, and all patch artifacts still require explicit approval before application.
+
+Patch blocks use this strict format:
+
+````text
+```agentforge-patch
+target_file: src/app.py
+title: Add health endpoint
+description: Adds a GET /health endpoint.
+---BEGIN DIFF---
+diff --git a/src/app.py b/src/app.py
+--- a/src/app.py
++++ b/src/app.py
+@@ ...
+---END DIFF---
+```
+````
 
 ### Workflow Runs
 
@@ -151,7 +169,7 @@ Agent categories documented for the dev pipeline:
 - Coding agents: `frontend`, `backend`
 - Post-coding agents: `testing`
 
-Phase 7 implements the loop architecture with deterministic planner policy only. Real LLM planner policy, dynamic workflow creation, dynamic tool calling, LLM-generated patches, Git commits, SDK, dashboard, and Docker are not implemented.
+Phase 7 implements the loop architecture with deterministic planner policy only. Real LLM planner policy, dynamic workflow creation, dynamic tool calling, Git commits, SDK, dashboard, and Docker are not implemented.
 
 ## Patch Review and Application
 
@@ -291,7 +309,7 @@ Artifact purposes:
 - `final_report.md` stores the human-readable agent output report.
 - `dev_run_summary.json` stores the request, project root, workflow path, max cycles, status, per-cycle generated patches, approval status, applied patches, testing report, planner decision, final verdict or stop reason, and run-level aggregates.
 
-Patch proposals begin as deterministic mock artifacts only. The response processor asks the patch generator to create readable unified-diff-like files for review, but it does not apply them or modify files in the inspected project root. A later explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command can apply one selected proposal and mark it as `applied`. Real LLM patch generation is deferred. Run artifacts are generated output, not source files. They should not be committed.
+For mock-provider runs, patch proposals are deterministic mock artifacts from the patch generator. For real-provider runs, patch-producing agents must include `agentforge-patch` fenced blocks; valid blocks are parsed into patch artifacts, and responses without valid blocks produce no patch proposals. The response processor writes patch artifacts only; it does not apply them or modify files in the inspected project root. A later explicit `agentforge patch apply <run_id> <patch_id> --project-root <path>` command can apply one selected proposal and mark it as `applied`. Run artifacts are generated output, not source files. They should not be committed.
 
 ## Core Ideas
 
@@ -299,7 +317,7 @@ Patch proposals begin as deterministic mock artifacts only. The response process
 
 Agents are small specialist roles. Each agent has a name, description, system prompt, input keys, output key, and allowed tools.
 
-Agents may also set `produces_patches: true` to emit deterministic Phase 3 patch proposal artifacts. The default is `false`.
+Agents may also set `produces_patches: true` to emit patch proposal artifacts. Mock runs use deterministic proposals; real-provider runs require structured `agentforge-patch` fenced blocks. The default is `false`.
 
 Example agents:
 

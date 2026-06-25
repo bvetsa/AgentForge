@@ -324,7 +324,31 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Do not add dynamic tool calling.
 - Do not add LLM-generated patches.
 
-## Phase 8: Dynamic Agent-Decided Tool Calling
+## Phase 8: Structured LLM Patch Proposals
+
+**Goal:** Let real providers produce patch proposal artifacts without direct file writes.
+
+**Status:** Implemented.
+
+**Implemented features:**
+
+- Strict `agentforge-patch` fenced-block parser
+- One or more parsed patch proposals per model response
+- Relative target-path validation
+- Diff target validation
+- Stable patch IDs and patch files
+- Real-provider responses use parsed patch proposals when present
+- Mock-provider responses keep deterministic patch proposal fallback
+- Real-provider responses without patch blocks produce no patch proposals
+
+**Important constraints:**
+
+- LLMs still do not directly edit files.
+- Patches remain artifacts until explicit human approval.
+- Dynamic tool calling is not implemented.
+- Deterministic mock patch generation remains available for tests and examples.
+
+## Phase 9: Dynamic Agent-Decided Tool Calling
 
 **Goal:** Allow agents to request tools during execution while preserving tool permissions and observability.
 
@@ -346,7 +370,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Keep read/write boundaries explicit.
 - Do not let dynamic tool calling bypass configured permissions.
 
-## Phase 9: Custom Agents and Workflows
+## Phase 10: Custom Agents and Workflows
 
 **Goal:** Improve CLI support for creating, validating, discovering, and organizing agent and workflow configs.
 
@@ -360,7 +384,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - Templates for new agents and workflows
 - Local config registry if appropriate
 
-## Phase 10: CLI Cleanup and UX Polish
+## Phase 11: CLI Cleanup and UX Polish
 
 **Goal:** Make the command-line product complete, coherent, and pleasant to use before adding other surfaces.
 
@@ -376,7 +400,7 @@ agentforge patch apply <run_id> <patch_id> --project-root examples/sample_projec
 - `--json` mode where appropriate
 - `--verbose` mode where appropriate
 
-## Phase 11: Python SDK
+## Phase 12: Python SDK
 
 **Goal:** Expose the stable engine through a Python API after the CLI product is complete.
 
@@ -394,7 +418,7 @@ print(result.final_report)
 
 The SDK should expose the core workflow engine without requiring the CLI.
 
-## Phase 12: Dashboard
+## Phase 13: Dashboard
 
 **Goal:** Add a visual interface after the CLI and SDK foundations are stable.
 

@@ -36,7 +36,9 @@ Phase 7 implemented the planner-controlled iteration loop. If tests fail and cyc
 
 Phase 7b added optional real LLM provider wiring through an OpenAI-compatible chat-completions provider. The deterministic mock provider remains the default for tests, CI, and offline runs.
 
-The current scope is still intentionally limited. AgentForge does not have a separate debugger agent, commit changes to Git, provide a dashboard, dynamically create workflows, perform real LLM planning, let agents dynamically decide which tools to call, or generate real patches from LLM output. Debugging/repair behavior comes from cycling the end-to-end pipeline. File modification only happens after explicit human approval through `agentforge patch apply` or the dev pipeline approval gate.
+Phase 8 added structured LLM patch proposal parsing. Real providers can create patch artifacts only when their response includes valid `agentforge-patch` fenced blocks. The deterministic mock provider still uses deterministic patch proposals.
+
+The current scope is still intentionally limited. AgentForge does not have a separate debugger agent, commit changes to Git, provide a dashboard, dynamically create workflows, perform real LLM planning, or let agents dynamically decide which tools to call. Debugging/repair behavior comes from cycling the end-to-end pipeline. File modification only happens after explicit human approval through `agentforge patch apply` or the dev pipeline approval gate. Real providers can propose patch artifacts, but they cannot directly write files.
 
 ## User Story
 
@@ -48,7 +50,7 @@ agentforge config set --llm-provider openai-compatible --llm-model gpt-4.1-mini
 export AGENTFORGE_LLM_API_KEY="..."
 ```
 
-Provider settings are optional. Non-secret project settings are stored in `.agentforge/config.toml`; API keys only come from `AGENTFORGE_LLM_API_KEY`. Environment variables override the project config file, and the default provider is `mock`.
+Provider settings are optional. Non-secret project settings are stored in `.agentforge/config.toml`; API keys only come from `AGENTFORGE_LLM_API_KEY`. Environment variables override the project config file, and the default provider is `mock`. Real providers must emit `agentforge-patch` fenced blocks for file changes to become patch artifacts.
 
 Then I can run:
 
@@ -145,6 +147,7 @@ Each agent reads specific keys from shared state and writes one new output key b
 - Mock LLM provider
 - Optional OpenAI-compatible LLM provider
 - Project-local non-secret LLM config command
+- Structured LLM patch proposal parser
 - Trace logging
 - Read-only project inspection tools
 - Tool registry
@@ -176,7 +179,7 @@ AgentForge currently does not include:
 - Dynamic agent-decided tool calling
 - Dynamic workflow creation
 - Real LLM planning policy
-- LLM-generated real patches
+- Direct file writes by LLMs
 
 These exclusions are intentional. The completed phases build a reliable, understandable, and safe CLI foundation before adding more powerful behavior or additional surfaces.
 
@@ -184,13 +187,13 @@ These exclusions are intentional. The completed phases build a reliable, underst
 
 Planned work should proceed in this order:
 
-1. Phase 8: Dynamic Agent-Decided Tool Calling
-2. Phase 9: Custom Agents and Workflows
-3. Phase 10: CLI Cleanup and UX Polish
-4. Phase 11: Python SDK
-5. Phase 12: Dashboard
+1. Phase 9: Dynamic Agent-Decided Tool Calling
+2. Phase 10: Custom Agents and Workflows
+3. Phase 11: CLI Cleanup and UX Polish
+4. Phase 12: Python SDK
+5. Phase 13: Dashboard
 
-Phases 8-10 continue the CLI and core engine work. The SDK and dashboard should come after the CLI product is stable.
+Phases 9-11 continue the CLI and core engine work. The SDK and dashboard should come after the CLI product is stable.
 
 ## Core Objects
 
@@ -306,11 +309,13 @@ The runner deterministically gathers tool context from this list before each age
 
 ### Patch Proposal
 
-A patch proposal is a reviewable code change artifact. Phase 3 generates deterministic mock proposals for agents configured with:
+A patch proposal is a reviewable code change artifact. Agents can be configured to produce patch proposals with:
 
 ```yaml
 produces_patches: true
 ```
+
+Mock-provider runs generate deterministic mock proposals for tests and examples. Real-provider runs parse proposals from strict `agentforge-patch` fenced blocks in the model response. If a real-provider response has no valid patch block, no patch proposal is created for that response.
 
 Each proposal includes:
 
@@ -341,7 +346,7 @@ agentforge patch apply <run_id> <patch_id> --project-root <path>
 
 `patch apply` applies only the selected proposal after explicit command invocation and changes that proposal's manifest status from `proposed` to `applied`.
 
-Patch proposal `target_file` values must be project-relative source or test files. The current deterministic mock generator uses sample-project fixture targets such as `src/app.py`, `src/models.py`, and `tests/test_app.py` only to exercise patch artifact and application behavior. Intelligent target selection is not implemented yet. Future versions will use project inspection, dynamic tool calling, and real model output to choose target files.
+Patch proposal `target_file` values must be project-relative source or test files. The current deterministic mock generator uses sample-project fixture targets such as `src/app.py`, `src/models.py`, and `tests/test_app.py` only to exercise patch artifact and application behavior. Real providers must include the target file in a valid unified diff inside the `agentforge-patch` block.
 
 Patch proposals must not point at `proposed/*.txt` files inside the project root.
 
@@ -510,7 +515,7 @@ The manifest is part of the run artifact contract and supports the Phase 4 revie
 - Dev pipeline tests must still use safe Phase 5 test execution.
 - Dev pipeline must not call reviewer before approval.
 - Dev pipeline repair behavior must come from planner-controlled cycles, not a separate debugger agent.
-- Real LLM planner policy, LLM-generated patches, dynamic workflow creation, and dynamic tool calling are not implemented.
+- Real LLM planner policy, direct LLM file writes, dynamic workflow creation, and dynamic tool calling are not implemented.
 - Project source files must not be modified by patch proposal generation.
 - Generated run artifacts under `.agentforge/runs/` are not source files and should not be committed.
 

@@ -72,9 +72,9 @@ DevPipelineRunner
 DevReportWriter + DevSummaryWriter
 ```
 
-Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution. Phase 6 added `agentforge dev run`, a human-approved end-to-end pipeline from request to patch proposals to approval to patch application to safe test execution to final verdict. Phase 7 added the planner-controlled iteration loop around that pipeline. Phase 7b added optional OpenAI-compatible provider wiring while keeping the deterministic mock provider as the default.
+Phase 1 proved the YAML-driven sequential workflow runner. Phase 2 added a controlled read-only tool layer for inspecting a project directory before each agent runs. Phase 3 added reviewable patch proposal artifacts for agents configured with `produces_patches: true`. Phase 4 added explicit CLI commands for listing, showing, and applying one selected patch proposal. Phase 5 added deterministic test command detection and execution. Phase 6 added `agentforge dev run`, a human-approved end-to-end pipeline from request to patch proposals to approval to patch application to safe test execution to final verdict. Phase 7 added the planner-controlled iteration loop around that pipeline. Phase 7b added optional OpenAI-compatible provider wiring while keeping the deterministic mock provider as the default. Phase 8 added structured LLM patch proposal parsing for real providers.
 
-AgentForge does not implement a separate debugger agent, dynamically create workflows, commit changes to Git, let agents dynamically choose tools, or generate real patches from LLM output. Debugging and repair behavior comes from cycling the end-to-end dev pipeline under planner control. Source modification requires human approval through `agentforge patch apply` or the dev pipeline approval gate in every cycle.
+AgentForge does not implement a separate debugger agent, dynamically create workflows, commit changes to Git, or let agents dynamically choose tools. Debugging and repair behavior comes from cycling the end-to-end dev pipeline under planner control. Real providers can propose patch artifacts through structured fenced blocks, but source modification still requires human approval through `agentforge patch apply` or the dev pipeline approval gate in every cycle.
 
 ## Phase 2 Tool Flow
 
@@ -91,7 +91,7 @@ Detailed flow:
 5. Tool output is formatted into `tool_context`.
 6. The prompt builder creates an agent invocation from the agent config, normal state inputs, and `tool_context`.
 7. The configured LLM provider receives the invocation and returns an agent response.
-8. The agent response processor extracts `response.content` and asks the configured patch generator for deterministic mock patch proposal artifacts when an agent is configured with `produces_patches: true`.
+8. The agent response processor extracts `response.content`, parses structured `agentforge-patch` blocks for real-provider patch proposals, and falls back to deterministic patch proposals only for mock-provider responses.
 9. Agent outputs, trace events, tool call records, preview-only LLM call records, patch files, and the patch manifest are written to run artifacts.
 
 Dynamic LLM-directed tool calling and intelligent patch target selection are intentionally deferred to later phases.
@@ -292,7 +292,7 @@ Responsibilities:
 - Run agents in order
 - Check that required input keys exist
 - Update state after each agent
-- Generate deterministic patch proposals for patch-producing agents
+- Generate patch proposal artifacts from structured LLM blocks or mock fallback
 - Record trace events
 - Record tool call events
 - Save run artifacts
@@ -432,12 +432,15 @@ The `src/agentforge/patches` package contains the patch proposal and review syst
 Current modules:
 
 - `mock_generator.py` - deterministic sample-project patch generation for tests and examples
+- `llm_parser.py` - strict `agentforge-patch` fenced-block parsing for real provider outputs
 - `models.py` - `PatchProposal` artifact model
 - `review.py` - manifest loading, diff inspection, safe selected-patch application
 - `writer.py` - patch file writing under the run artifact directory
 - `__init__.py` - public exports
 
-Patch-producing agents emit one deterministic mock proposal per successful agent step through the configured `PatchGenerator`. The default `DeterministicPatchGenerator` uses an explicit sample-project target list so tests can apply real diffs to real files. This is temporary mock behavior, not a production file-selection strategy and not a mapping from agent names to files.
+Patch-producing agents can emit patch proposals in two ways. Mock-provider runs emit one deterministic mock proposal per successful patch-producing agent step through the configured `PatchGenerator`. Real-provider runs emit patch proposals only when the model response contains valid `agentforge-patch` fenced blocks. Real-provider responses without valid blocks produce no patch proposals.
+
+The default `DeterministicPatchGenerator` uses an explicit sample-project target list so tests can apply real diffs to real files. This is temporary mock behavior, not a production file-selection strategy and not a mapping from agent names to files.
 
 The patch writer only writes under the run directory. It does not apply diffs, open Git, execute tests, or modify the inspected project root.
 
@@ -469,7 +472,7 @@ Reasons for using a mock first:
 - Makes tests reliable
 - Lets the engine be tested before integrating real model providers
 
-The mock provider returns deterministic `AgentResponse` objects using the same response shape real providers share. `AgentResponse` can carry future action fields, but deterministic patch artifacts are still generated by the response processor through the patch generator. Real LLM patch generation and dynamic tool calling remain deferred.
+The mock provider returns deterministic `AgentResponse` objects using the same response shape real providers share. `AgentResponse` can carry future action fields. For mock responses, deterministic patch artifacts are still generated by the response processor through the patch generator. For real-provider responses, patch artifacts are parsed from `agentforge-patch` fenced blocks. Dynamic tool calling remains deferred.
 
 ### Run Artifacts
 
